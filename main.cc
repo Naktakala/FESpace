@@ -3,6 +3,8 @@
 #include "ChiConsole/chi_console.h"
 #include "chi_log.h"
 
+#include "FiniteElementSpace/lua/fe_lua_utils.h"
+
 int main(int argc, char* argv[])
 {
   ChiLog&     log     = ChiLog::GetInstance();
@@ -13,7 +15,7 @@ int main(int argc, char* argv[])
 
   auto& lua_console = ChiConsole::GetInstance();
 
-//  mcpartra::lua_utils::RegisterLuaEntities(lua_console.consoleState);
+  chi_math::lua_utils::RegisterLuaEntities(lua_console.consoleState);
 
   ChiTech::RunBatch(argc,argv);
 
