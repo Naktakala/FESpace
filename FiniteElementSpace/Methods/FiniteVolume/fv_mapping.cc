@@ -6,8 +6,9 @@ using namespace chi_math::finite_element;
 
 //###################################################################
 /**Constructs a Finite Volume mapping of a cell.*/
-FiniteVolumeMapping::FiniteVolumeMapping(const chi_mesh::Cell& cell,
-                                         const chi_mesh::MeshContinuum& grid)
+FiniteVolume::FiniteVolume(const chi_mesh::Cell& cell,
+                           const chi_mesh::MeshContinuum& grid) :
+                                         FiniteElementMapping(cell, grid)
 {
   m_num_nodes = 1;
 
@@ -93,14 +94,13 @@ FiniteVolumeMapping::FiniteVolumeMapping(const chi_mesh::Cell& cell,
                            " encountered.");
 }
 
-size_t FiniteVolumeMapping::GetCellNumNodes(const chi_mesh::Cell& cell) const
+size_t FiniteVolume::CellNumNodes(const chi_mesh::Cell& cell) const
 {
   return 1;
 }
 
-std::vector<chi_mesh::Vector3> FiniteVolumeMapping::
-  GetCellNodeLocations(const chi_mesh::Cell& cell,
-                      const chi_mesh::MeshContinuum& grid) const
+std::vector<chi_mesh::Vector3> FiniteVolume::
+  CellNodeLocations(const chi_mesh::Cell& cell) const
 {
   return {cell.centroid};
 }

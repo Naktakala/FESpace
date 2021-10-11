@@ -6,20 +6,19 @@
 namespace chi_math::finite_element
 {
 
-//################################################################# Class def
-/**Finite volume mapping class*/
-class FiniteVolumeMapping : public FiniteElementMapping
-{
-public:
-  explicit FiniteVolumeMapping(const chi_mesh::Cell& cell,
-                               const chi_mesh::MeshContinuum& grid);
+  //################################################################# Class def
+  /**Finite volume mapping class*/
+  class FiniteVolume : public FiniteElementMapping
+  {
+  public:
+    explicit FiniteVolume(const chi_mesh::Cell& cell,
+                          const chi_mesh::MeshContinuum& grid);
 
-  size_t GetCellNumNodes(const chi_mesh::Cell& cell) const override;
+    size_t CellNumNodes(const chi_mesh::Cell& cell) const override;
 
-  std::vector<chi_mesh::Vector3>
-  GetCellNodeLocations(const chi_mesh::Cell& cell,
-                       const chi_mesh::MeshContinuum& grid) const override;
-};
+    std::vector<chi_mesh::Vector3>
+    CellNodeLocations(const chi_mesh::Cell& cell) const override;
+  };
 
 }
 

@@ -6,9 +6,10 @@ using namespace chi_math::finite_element;
 
 //###################################################################
 /**Constructs a Finite Volume mapping of a cell.*/
-PiecewiseLinearMapping::
-  PiecewiseLinearMapping(const chi_mesh::Cell& cell,
-                         const chi_mesh::MeshContinuum& grid)
+PiecewiseLinear::
+  PiecewiseLinear(const chi_mesh::Cell& cell,
+                  const chi_mesh::MeshContinuum& grid) :
+                         FiniteElementMapping(cell, grid)
 {
   m_num_nodes = 1;
 
@@ -95,22 +96,21 @@ PiecewiseLinearMapping::
 }
 
 //###################################################################
-size_t PiecewiseLinearMapping::
-  GetCellNumNodes(const chi_mesh::Cell& cell) const
+size_t PiecewiseLinear::
+  CellNumNodes(const chi_mesh::Cell& cell) const
 {
   return cell.vertex_ids.size();
 }
 
-std::vector<chi_mesh::Vector3> PiecewiseLinearMapping::
-  GetCellNodeLocations(const chi_mesh::Cell& cell,
-                       const chi_mesh::MeshContinuum& grid) const
+std::vector<chi_mesh::Vector3> PiecewiseLinear::
+  CellNodeLocations(const chi_mesh::Cell& cell) const
 {
-  size_t num_nodes = GetCellNumNodes(cell);
+  size_t num_nodes = CellNumNodes(cell);
   std::vector<chi_mesh::Vector3> node_locations;
   node_locations.reserve(num_nodes);
 
   for (uint64_t vid : cell.vertex_ids)
-    node_locations.push_back(grid.vertices[vid]);
+    node_locations.push_back(m_grid.vertices[vid]);
 
   return node_locations;
 }

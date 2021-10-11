@@ -1,8 +1,8 @@
 #include "fe_lua_utils.h"
 
 #include "fe_space.h"
-#include "Methods/FiniteVolume/finite_volume.h"
-#include "Methods/PiecewiseLinear/pwld.h"
+#include "Methods/FiniteVolume/fv_mapping.h"
+#include "Methods/PiecewiseLinear/pwl_mapping.h"
 
 #include "ChiMesh/MeshHandler/chi_meshhandler.h"
 
@@ -43,7 +43,7 @@ int chi_math::lua_utils::chiFESpaceTest(lua_State *L)
 
   //============================================= PWL
   {
-    FiniteElementSpace<PiecewiseLinearDiscontinuous> fe(grid);
+    FiniteElementSpace<PiecewiseLinear> fe(grid);
 
     size_t c=0;
     for (const auto& cell : fe.Grid().local_cells)

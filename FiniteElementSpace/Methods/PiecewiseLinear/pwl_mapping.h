@@ -5,19 +5,19 @@
 
 namespace chi_math::finite_element
 {
+
   //################################################################# Class def
-  /**Finite volume mapping class*/
-  class PiecewiseLinearMapping : public FiniteElementMapping
+  /**Piecewise linear Finite Element mapping class*/
+  class PiecewiseLinear : public FiniteElementMapping
   {
   public:
-    explicit PiecewiseLinearMapping(const chi_mesh::Cell& cell,
-                                    const chi_mesh::MeshContinuum& grid);
+    explicit PiecewiseLinear(const chi_mesh::Cell& cell,
+                             const chi_mesh::MeshContinuum& grid);
 
-    size_t GetCellNumNodes(const chi_mesh::Cell& cell) const override;
+    size_t CellNumNodes(const chi_mesh::Cell& cell) const override;
 
     std::vector<chi_mesh::Vector3>
-    GetCellNodeLocations(const chi_mesh::Cell& cell,
-                         const chi_mesh::MeshContinuum& grid) const override;
+    CellNodeLocations(const chi_mesh::Cell& cell) const override;
   };
 
 }

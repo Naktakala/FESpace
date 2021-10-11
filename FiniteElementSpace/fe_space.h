@@ -2,55 +2,22 @@
 #define FINITE_ELEMENT_SPACE_H
 
 #include "ChiMath/chi_math.h"
-#include "ChiMath/SpatialDiscretization/FiniteElement/finite_element.h"
 
 #include "ChiMesh/MeshContinuum/chi_meshcontinuum.h"
 
-#include "Methods/FEMethodBase.h"
-
-namespace chi_math
-{
-  void FESpaceTest();
-}//namespace chi_math
+#include "fe_space_flags.h"
+#include "Methods/FEMappingBase.h"
 
 namespace chi_math::finite_element
 {
-  enum class FESpaceFlags : unsigned int
-  {
-    NO_FLAGS_SET                          = 0,
-    PREBUILD_CELL_MAPPINGS                = (1 << 0),
-    PRECOMPUTE_IntV_gradShapeI_gradShapeJ = (1 << 1),
-    PRECOMPUTE_IntV_shapeI_gradShapeJ     = (1 << 2),
-    PRECOMPUTE_IntV_shapeI_shapeJ         = (1 << 3),
-    PRECOMPUTE_IntV_shapeI                = (1 << 4),
-    PRECOMPUTE_IntV_gradShapeI            = (1 << 5),
-
-    PRECOMPUTE_IntS_shapeI_shapeJ         = (1 << 6),
-    PRECOMPUTE_IntS_shapeI                = (1 << 7),
-    PRECOMPUTE_IntS_shapeI_gradshapeJ     = (1 << 8),
-
-    PRECOMPUTE_FACE_NODE_MAPPINGS         = (1 << 9)
-  };
-
-  inline FESpaceFlags
-  operator|(const FESpaceFlags f1, const FESpaceFlags f2)
-  {
-    return static_cast<FESpaceFlags>(static_cast<unsigned int>(f1) |
-                                     static_cast<unsigned int>(f2));
-  }
-}//namespace chi_math
-
-namespace chi_math::finite_element
-{
-  template<class ArbMethod>
+  template<class ArbMapping>
   class FiniteElementSpace
   {
   private:
     std::string                      m_text_name;
   protected:
     const chi_mesh::MeshContinuumPtr m_grid;
-    FiniteElementMethod&             m_fe_method;
-    ArbMethod                        m_arb_fe_method;
+    std::vector<ArbMapping> m_cell_mappings;
 
     using QuadraturePtr = std::unique_ptr<chi_math::Quadrature>;
     std::map<chi_mesh::CellType, QuadraturePtr> m_celltype_to_quadrature_map;
@@ -59,16 +26,17 @@ namespace chi_math::finite_element
     /**Constructor.*/
     explicit
     FiniteElementSpace(chi_mesh::MeshContinuumPtr& in_grid) :
-      m_grid(in_grid),
-      m_fe_method(m_arb_fe_method)
+      m_grid(in_grid)
     {
-      m_celltype_to_quadrature_map =
-        m_fe_method.MapRequiredQuadratures(*m_grid, QuadratureOrder::SECOND);
+      m_cell_mappings.reserve(m_grid->local_cells.size());
+      for (const auto& cell : m_grid->local_cells)
+        m_cell_mappings.push_back(ArbMapping(cell, *m_grid));
     }
 
     FEMappingPtr GetCellMapping(const chi_mesh::Cell& cell)
     {
-      return m_fe_method.MakeCellMapping(cell, *m_grid);
+      auto arb_mapping = std::make_unique<ArbMapping>(cell, *m_grid);
+      return std::static_pointer_cast<FiniteElementMapping>(arb_mapping);
     }
 
     /**Returns the grid associated with this space.*/
@@ -77,13 +45,13 @@ namespace chi_math::finite_element
     /**Gets the number of nodes (not DOFs) for the
      * requested cell.*/
     size_t GetCellNumNodes(const chi_mesh::Cell& cell)
-    {return m_fe_method.GetCellNumNodes(cell);}
+    {return m_cell_mappings[cell.local_id].CellNumNodes(cell);}
 
     /**Returns the locations of all the nodes of the cell
      * consistent with the supplied mapping.*/
     std::vector<chi_mesh::Vector3>
     GetCellNodeLocations(const chi_mesh::Cell& cell)
-    {return m_fe_method.GetCellNodeLocations(cell, *m_grid);}
+    {return m_cell_mappings[cell.local_id].CellNodeLocations(cell);}
 
     /**Returns the text name associated with this space.*/
     std::string TextName() const {return m_text_name;}

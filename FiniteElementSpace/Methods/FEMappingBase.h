@@ -12,22 +12,27 @@ namespace chi_math::finite_element
 class FiniteElementMapping
 {
 protected:
-  size_t              m_num_nodes=0;
-  double              m_volume=0.0;
-  std::vector<double> m_face_areas;
+  size_t                         m_num_nodes=0;
+  double                         m_volume=0.0;
+  std::vector<double>            m_face_areas;
+  const chi_mesh::Cell&          m_cell;
+  const chi_mesh::MeshContinuum& m_grid;
 
-  FiniteElementMapping() {}
+  explicit FiniteElementMapping(const chi_mesh::Cell& cell,
+                                const chi_mesh::MeshContinuum& grid) :
+                                m_cell(cell),
+                                m_grid(grid)
+                                {}
 
 public:
   /**Returns the number of nodes associated with a given cell.*/
   virtual
-  size_t GetCellNumNodes(const chi_mesh::Cell& cell) const = 0;
+  size_t CellNumNodes(const chi_mesh::Cell& cell) const = 0;
 
   /**Returns the locations of the nodes associated with a given cell.*/
   virtual
   std::vector<chi_mesh::Vector3>
-  GetCellNodeLocations(const chi_mesh::Cell& cell,
-                       const chi_mesh::MeshContinuum& grid) const = 0;
+  CellNodeLocations(const chi_mesh::Cell& cell) const = 0;
 
   /**Returns the volume of the cell associated with this mapping.*/
   double Volume() const {return m_volume;}
