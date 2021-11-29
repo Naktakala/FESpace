@@ -1,5 +1,5 @@
-#ifndef FESPACETEST_FE_SPACE_FLAGS_H
-#define FESPACETEST_FE_SPACE_FLAGS_H
+#ifndef FESPACETEST_FE_SPACE_STRUCTURES_H
+#define FESPACETEST_FE_SPACE_STRUCTURES_H
 
 namespace chi_math::finite_element
 {
@@ -26,6 +26,6 @@ namespace chi_math::finite_element
     return static_cast<FESpaceFlags>(static_cast<unsigned int>(f1) |
                                      static_cast<unsigned int>(f2));
   }
-}//namespace chi_math
+}//namespace chi_math::finite_element
 
-#endif //FESPACETEST_FE_SPACE_FLAGS_H
+#endif //FESPACETEST_FE_SPACE_STRUCTURES_H

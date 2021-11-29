@@ -1,26 +1,22 @@
-#include "fv_mapping.h"
+#include "chi_mesh_utils.h"
 
 #include "ChiMesh/MeshContinuum/chi_meshcontinuum.h"
 
-using namespace chi_math::finite_element;
-
-//###################################################################
-/**Constructs a Finite Volume mapping of a cell.*/
-FiniteVolume::FiniteVolume(const chi_mesh::Cell& cell,
-                           const chi_mesh::MeshContinuum& grid) :
-                                         FiniteElementMapping(cell, grid)
+chi_mesh::CellVolumeAndFaceAreas chi_mesh::
+  ComputeCellVolumeAndFaceAreas(const chi_mesh::Cell &cell,
+                                  const chi_mesh::MeshContinuum& grid)
 {
-  m_num_nodes = 1;
+  CellVolumeAndFaceAreas cell_info;
 
   if (cell.Type() == chi_mesh::CellType::SLAB)
   {
     const auto& v0 = grid.vertices[cell.vertex_ids[0]];
     const auto& v1 = grid.vertices[cell.vertex_ids[1]];
 
-    m_volume = (v1-v0).Norm();
-    m_face_areas.reserve(2);
-    m_face_areas.push_back(1.0); //First face  unit area
-    m_face_areas.push_back(1.0); //Second face unit area
+    cell_info.volume = (v1-v0).Norm();
+    cell_info.face_areas.reserve(2);
+    cell_info.face_areas.push_back(1.0); //First face  unit area
+    cell_info.face_areas.push_back(1.0); //Second face unit area
   }
   else if (cell.Type() == chi_mesh::CellType::POLYGON)
   {
@@ -43,8 +39,8 @@ FiniteVolume::FiniteVolume(const chi_mesh::Cell& cell,
       face_areas.push_back((v1-v0).Norm()); //Length of an edge time unit h
     }//for face_edge
 
-    m_volume = volume;
-    m_face_areas = std::move(face_areas);
+    cell_info.volume = volume;
+    cell_info.face_areas = std::move(face_areas);
   }
   else if (cell.Type() == chi_mesh::CellType::POLYHEDRON)
   {
@@ -86,21 +82,12 @@ FiniteVolume::FiniteVolume(const chi_mesh::Cell& cell,
       face_areas.push_back(face_area);
     }//for face
 
-    m_volume = volume;
-    m_face_areas = face_areas;
+    cell_info.volume = volume;
+    cell_info.face_areas = face_areas;
   }
   else
     throw std::logic_error(std::string(__FUNCTION__) + "Unsupported cell-type"
                            " encountered.");
-}
 
-size_t FiniteVolume::CellNumNodes(const chi_mesh::Cell& cell) const
-{
-  return 1;
-}
-
-std::vector<chi_mesh::Vector3> FiniteVolume::
-  CellNodeLocations(const chi_mesh::Cell& cell) const
-{
-  return {cell.centroid};
+  return cell_info;
 }

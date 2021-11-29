@@ -31,6 +31,7 @@ include(${CHI_TECH_DIR}/ChiResources/Macros/Filter.cmake)
 
 #================================================ Default include directories
 include_directories(${PROJECT_SOURCE_DIR}/${CHI_MODULE_DIR})
+include_directories(${PROJECT_SOURCE_DIR})
 
 #================================================ Library directories
 # Link to external dependencies other than ChiTech
@@ -41,6 +42,9 @@ include_directories(${PROJECT_SOURCE_DIR}/${CHI_MODULE_DIR})
 # The directory added below will need to populate
 # the variable ${SOURCES}
 add_subdirectory(${PROJECT_SOURCE_DIR}/${CHI_MODULE_DIR})
+add_subdirectory(${PROJECT_SOURCE_DIR}/ChiMesh)
+add_subdirectory(${PROJECT_SOURCE_DIR}/ChiMPI)
+add_subdirectory(${PROJECT_SOURCE_DIR}/DiffusionTest)
 
 #================================================ Set Misc flags
 # set(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} -O3")

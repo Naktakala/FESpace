@@ -1,5 +1,5 @@
-#ifndef FINITE_ELEMENT_METHOD_FINITE_VOLUME_MAPPING_H
-#define FINITE_ELEMENT_METHOD_FINITE_VOLUME_MAPPING_H
+#ifndef FINITE_ELEMENT_METHOD_LAGRANGE_MAPPING_H
+#define FINITE_ELEMENT_METHOD_LAGRANGE_MAPPING_H
 
 #include "Methods/FEMappingBase.h"
 
@@ -7,21 +7,21 @@ namespace chi_math::finite_element
 {
 
   //################################################################# Class def
-  /**Finite volume mapping class*/
-  class FiniteVolume : public FiniteElementMapping
+  /**Lagrange mapping class.*/
+  class LagrangeQ2 : public FiniteElementMapping
   {
   public:
-    FiniteVolume(const chi_mesh::Cell& cell,
-                 const chi_mesh::MeshContinuum& grid,
-                 size_t& node_register_size);
-    FiniteVolume(const chi_mesh::Cell& cell,
-                 const chi_mesh::MeshContinuum& grid,
-                 std::vector<NodeInfo>& node_list);
+    LagrangeQ2(const chi_mesh::Cell& cell,
+               const chi_mesh::MeshContinuum& grid,
+               size_t& node_register_size);
+    LagrangeQ2(const chi_mesh::Cell& cell,
+               const chi_mesh::MeshContinuum& grid,
+               std::vector<NodeInfo>& node_list);
 
   public:
 //    std::vector<NodeInfo> GetNodeInfo() const override;
 
-  public:
+  public: //Overriding functions
     std::vector<chi_mesh::Vector3>
     CellNodeLocations(const chi_mesh::Cell& cell) const override;
 
@@ -36,9 +36,8 @@ namespace chi_math::finite_element
     {
       return VolumeQPData({}, {}, {}, {}, {});
     }
-
   };
 
 }//namespace chi_math::finite_element
 
-#endif //FINITE_ELEMENT_METHOD_FINITE_VOLUME_MAPPING_H
+#endif //FINITE_ELEMENT_METHOD_LAGRANGE_MAPPING_H
