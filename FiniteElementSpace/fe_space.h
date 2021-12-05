@@ -6,12 +6,17 @@
 #include "ChiMesh/MeshContinuum/chi_meshcontinuum.h"
 
 #include "fe_space_structures.h"
+#include "fe_space_utils.h"
 #include "Methods/FEMappingBase.h"
 
 #include <unistd.h>
 
 namespace chi_math::finite_element
 {
+  typedef std::pair<NodeInfo,uint64_t> NodeInfoIDPair;
+  typedef std::vector<NodeInfoIDPair> VecNodeInfoIDPair;
+  typedef std::map<uint64_t, std::vector<NodeInfo>> LocINodeInfoMap;
+
   //################################################################# Class def
   /**Base class for spatial discretizations.*/
   class SpatialDiscretization
@@ -21,13 +26,18 @@ namespace chi_math::finite_element
   protected:
     const chi_mesh::MeshContinuumPtr m_grid;
     std::vector<FEMappingPtr>        m_local_cell_mappings;
-    std::vector<FEMappingPtr>        m_ghost_cell_mappings;
+    std::map<uint64_t, FEMappingPtr> m_ghost_cell_mappings;
 
-    std::vector<chi_mesh::Vector3>   m_local_unique_node_locations;
-    std::vector<size_t>              m_node_register_2_local_unique_map;
+    std::vector<chi_mesh::Vector3>   m_LNLL; ///< Local Node Location List
+    std::vector<size_t>              m_LNR_id_2_LNLL_id_map;
 
-    std::vector<int64_t>             m_node_register_local_ids;
-    std::vector<int64_t>             m_node_register_global_ids;
+    std::vector<chi_mesh::Vector3>   m_GNLL; ///< Ghost Node Location List
+    std::vector<size_t>              m_GNR_id_2_GNLL_id_map;
+
+    std::vector<int64_t>             m_LNR_local_ids;
+    std::vector<int64_t>             m_LNR_global_ids;
+
+    std::vector<int64_t>             m_GNR_global_ids;
 
   protected:
     explicit
@@ -35,19 +45,30 @@ namespace chi_math::finite_element
       m_grid(in_grid) {}
 
     void AssembleNodes(
-      const std::vector<NodeInfo>& node_register_node_info,
-      const std::vector<std::pair<NodeInfo,uint64_t>>& ghost_scope_nodes_pids);
+      const std::vector<NodeInfo>& LNR,
+      const VecNodeInfoIDPair& GNR);
 
+  private:
+   static VecNodeInfoIDPair FilterGhostNodeRegister(
+      const VecNodeInfoIDPair& GNR);
+
+   static std::vector<NodeInfo> SubtractGNRFromLNR(
+     NodeInfoListManager& LNR_manager,
+     const VecNodeInfoIDPair& GNR);
+
+   static VecNodeInfoIDPair IntersectGNRWithLNR(
+     NodeInfoListManager& LNR_manager,
+     const VecNodeInfoIDPair& GNR);
+
+   static LocINodeInfoMap
+    ConsolidateGNR(const VecNodeInfoIDPair& GNR);
+
+   static LocINodeInfoMap
+    SerializeAndCommunicateGNR(const LocINodeInfoMap& consolidated_GNR);
+
+   static std::vector<int64_t> CreateGlobalIDMapForLNR(
+     const std::vector<NodeInfo>& LNR);
   public:
-    virtual FEMappingPtr GetCellMapping(const chi_mesh::Cell& cell) const = 0;
-
-    virtual void OrderNodes()
-    {
-      OrderNodesContinuous();
-    }
-    void OrderNodesContinuous();
-    void OrderNodesDisContinuous();
-
     /**Returns the grid associated with this space.*/
     const chi_mesh::MeshContinuum& Grid() const {return *m_grid;}
 
@@ -90,6 +111,12 @@ namespace chi_math::finite_element
     /**Sets the text name to be associated with this space.*/
     void SetTextName(const std::string& text_name) {m_text_name = text_name;}
 
+    //02
+    int64_t MapNodeLocal(const chi_mesh::Cell& cell, size_t node_index) const;
+    int64_t MapNodeGlobal(const chi_mesh::Cell& cell, size_t node_index) const;
+
+    std::vector<size_t> CellNodeIndices(const chi_mesh::Cell& cell) const;
+
     virtual ~SpatialDiscretization() = default;
   };
 
@@ -109,65 +136,35 @@ namespace chi_math::finite_element
     FiniteElementSpace(chi_mesh::MeshContinuumPtr& in_grid) :
       SpatialDiscretization(in_grid)
     {
-//      MPI_Barrier(MPI_COMM_WORLD);
-//      std::cout << "Pause before cell mapping";
-//      MPI_Barrier(MPI_COMM_WORLD);
-//      usleep(10000000);
-
-      MPI_Barrier(MPI_COMM_WORLD);
-      std::cout << "Creating cell mappings\n";
-      MPI_Barrier(MPI_COMM_WORLD);
-
-      std::vector<NodeInfo> node_register_node_info;
+      std::vector<NodeInfo> local_node_register;
       m_local_cell_mappings.reserve(m_grid->local_cells.size());
       for (const auto& cell : m_grid->local_cells)
         m_local_cell_mappings.push_back(
-          std::make_unique<ArbMapping>(cell, *m_grid, node_register_node_info));
+          std::make_unique<ArbMapping>(cell, *m_grid, local_node_register));
 
-      MPI_Barrier(MPI_COMM_WORLD);
-      std::cout << "Creating ghost cell mappings\n";
-      MPI_Barrier(MPI_COMM_WORLD);
-
-      std::vector<std::pair<NodeInfo,uint64_t>> ghost_scope_nodes_pids;
+      std::vector<std::pair<NodeInfo,uint64_t>> ghost_node_register;
       {
         const std::vector<uint64_t> ghost_cell_global_ids =
           m_grid->cells.GetGhostGlobalIDs();
 
-        for (uint64_t ghost_id : ghost_cell_global_ids)
+        for (uint64_t ghost_global_id : ghost_cell_global_ids)
         {
-          const auto& cell = m_grid->cells[ghost_id];
+          const auto& cell = m_grid->cells[ghost_global_id];
           std::vector<NodeInfo> ghost_node_list;
-          m_ghost_cell_mappings.push_back(
-            std::make_unique<ArbMapping>(cell, *m_grid,ghost_node_list));
+          m_ghost_cell_mappings[ghost_global_id] =
+            std::make_unique<ArbMapping>(cell, *m_grid,ghost_node_list);
           for (auto& node : ghost_node_list)
-            ghost_scope_nodes_pids.emplace_back(node, cell.partition_id);
+            ghost_node_register.emplace_back(node, cell.partition_id);
         }
       }
 
-//      MPI_Barrier(MPI_COMM_WORLD);
-//      std::cout << "Pause before nodes assembly";
-//      MPI_Barrier(MPI_COMM_WORLD);
-//      usleep(10000000);
-
-      AssembleNodes(node_register_node_info, ghost_scope_nodes_pids);
-
-//      MPI_Barrier(MPI_COMM_WORLD);
-//      std::cout << "Pause after nodes assembly";
-//      MPI_Barrier(MPI_COMM_WORLD);
-//      usleep(10000000);
+      AssembleNodes(local_node_register, ghost_node_register);
     }
 
     static SpatialDiscretizationPtr New(chi_mesh::MeshContinuumPtr& in_grid)
     {
       auto new_space = std::make_unique<FiniteElementSpace<ArbMapping>>(in_grid);
       return std::move(new_space);
-    }
-
-    FEMappingPtr GetCellMapping(const chi_mesh::Cell& cell) const override
-    {
-      size_t temp_sizer=0;
-      auto arb_mapping = std::make_unique<ArbMapping>(cell, *m_grid, temp_sizer);
-      return std::move(arb_mapping);
     }
   };
 

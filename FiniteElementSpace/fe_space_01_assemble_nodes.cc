@@ -5,514 +5,405 @@
 #include "chi_log.h"
 extern ChiLog& chi_log;
 
-#include "chi_mpi.h"
-extern ChiMPI& chi_mpi;
-
 #include "ChiMPI/chi_mpi_map_all2all.h"
 
 //###################################################################
-/**Assembles the nodes for this discretization.*/
+/**Assembles the nodes for this discretization.
+
+## _
+
+### Abbreviations
+- NR = Node Register.
+- LNR = Local Node Register.
+- GNR = Ghost Node Register.
+- LNLL = Local Node Location List.
+- GNLL = Ghost Node Location List.
+- TLNR = True Local Node Register.
+- IGNR = Intersected Ghost Node Register.
+- QNR = Query Node Register.
+- IQNR = Intersected Query Node Register.
+- FQNR = Filtered Query Node Register.
+- pid. Partition-id.
+
+### Gameplan
+ The process here starts with a Local Node Register (LNR) and a
+ Ghost Node Register (GNR). A LNR is created from only the nodes on the local
+ cells and is just a list (`std::vector<NodeInfo>`). A GNR is created from the
+ the nodes on the ghost cells, with each ghost cell belonging to a particular
+ partition, which requires each node to be accompanied by its partition-id at
+ the moment it gets registered.
+ Cells register their nodes in isolation from other cells, meaning two cells
+ can register two nodes that are technically the same. We cannot determine
+ whether a node (in a register) is duplicated by comparing its `Vector3`
+ location because floating point precision issues will incur undue reliability
+ issues. Instead, duplicates are identified via integer identification
+ quantities, i.e. vertex-ids, cell-ids, cell-face node counts, etc.
+ Duplicate nodes that lie on a partition interface have their ownership
+ determined by the partition-id with the lowest integer-value.
+
+ The steps in this process are as follows:
+    - We filter the LNR, creating a filtered LNR (FLNR)
+    - We use the FLNR to extract the local node location list (LNLL)
+    - We use the LNR and FLNR to define a mapping from an LNR-id to a
+      FLNR-id, which is identical to a mapping between LNR-id and LNLL-id.
+
+    - Next we filter the GNR, creating a filtered GNR (FGNR)
+    - Similar to the LNR, we use the FGNR to extract a ghost node location
+      list (GNLL)
+    - We also then use the GNR and FGNR to define a mapping from an LNR-id to a
+      GNLL-id.
+
+    - Subtract the FGNR from the FLNR.
+      We need to know the true locally owned nodes so that we can get some
+      sane way to determine local- and global-ids for any of the nodes (not just
+      the true local ones). We therefore create a true local node register (TLNR)
+      which is formed from the FLNR by removing/subtracting duplicate nodes in
+      the FGNR. The set of duplicate nodes are only subtracted, individually, if
+      the ghost node's partition-id is lower than the local partition-id
+      (meaning the ghost's partition-id owns that node).
+
+      NOTE: We can only determine the ownership of a node if it is in the LNR.
+            This is because we can only break the partition-based ties for nodes
+            that lie on the partition interfaces. This is in turn caused by the
+            fact that we only have information on the first layer of ghost cells.
+
+    - Populate local node register local-ids. With the TLNR established we
+      can map nodes in the LNR to a possible node in the TLNR and therefore
+      a local-id.
+    - Assign global-ids to all true local nodes.
+      Using the TLNR, we can start from partition-0 and start stacking
+      the true local nodes for each consecutive location. Partition-0 with true
+      local node local-ids  0, 1, ..., N_L0 will map to global-ids
+      0, 1, ..., N_L0. Here N_L0 is the number of true local nodes -1 for
+      partition-0. In general N_LX is the number of true local nodes -1 for
+      partition-X.
+      After partition-0 each partition-J will have the global-id of
+      its first local node map to the global-id + 1 of the last local node of
+      partition-(J-1), and thereafter the global-ids continue sequentially for
+      the rest of the local nodes of partition-J. This can practically be done
+      by simply all-gathering the num_true_local_nodes (N_L0, N_L1, etc.) of
+      each partition. We have a routine that encapsulates this process called
+      `CreateGlobalIDMapForLNR`.
+
+    - Create an intersected GNR (IGNR).
+      Intersect the set of nodes in the FGNR with the set of nodes in the FLNR.
+      This will give us a list of nodes, on the partition-interfaces, which are
+      not true local nodes, however, we know exactly to which partition-ids
+      they are True Local to.
+    - Create consolidated GNR for the IGNR (consolidated IGNR).
+      For more efficient communication we consolidate nodes belonging to the
+      same partition-ids into a map structure. This essentially allows us to
+      easily use an AllToAllv MPI command.
+    - Cross-communicate to establish intersected query node register (IQNR).
+      By cross-communicating the IGNRs via an AllToAllv command, each location
+      then has a map structure of query nodes (with the map-keys indicating
+      which partition the query-nodes originate from).
+    - Map the intersected query nodes.
+      Since all the query nodes are guaranteed to be true local nodes, and since
+      we know the global-ids of all the true local nodes, we simply
+      search the TLNR for these nodes and provide the global-id.
+    - Communicate back the IQNR node mappings. This returns as a consolidated
+      IGNR mapping.
+
+    - Make global-ids for all nodes in the LNR.
+      At this point a node in the LNR will either be in the TLNR or the IGNR and
+      therefore we ought to have a global-id for it.
+
+    - Since all the nodes in the LNR are mapped we can now ask neighboring
+      partitions to map nodes that are in the GNR even if they are not in the
+      LNR. We start by consolidating the FGNR.
+    - Cross-communicate to establish filtered query node register (FQNR).
+    - We now look through the LNR and find a global id for each query node.
+    - Communicate back the FQNR node mappings. This returns as a consolidated
+      FGNR mapping.
+
+    - Finally we assign the global-ids for each node in the GNR.
+
+ */
 void chi_math::finite_element::SpatialDiscretization::
-  AssembleNodes(const std::vector<NodeInfo>& node_register_node_info,
-                const std::vector<std::pair<NodeInfo,uint64_t>>& ghost_node_register_node_info)
+  AssembleNodes(const std::vector<NodeInfo>& LNR, //Local Node Register
+                const VecNodeInfoIDPair& GNR)     //Ghost Node Register
 {
-  MPI_Barrier(MPI_COMM_WORLD);
-  chi_log.Log(LOG_ALL) << "Assembling nodes";
-  MPI_Barrier(MPI_COMM_WORLD);
-
-  /**Document this.*/
-  class NodeFinder
-  {
-  private:
-    const std::vector<NodeInfo>& m_node_list;
-
-    std::map<uint64_t, std::set<size_t>> m_vertex_subscriptions;
-    std::map<uint64_t, std::set<size_t>> m_cell_subscriptions;
-    std::map<uint64_t, std::set<size_t>> m_aux_number_subscriptions;
-
-  public:
-    explicit NodeFinder(const std::vector<NodeInfo>& node_list) :
-      m_node_list(node_list)
-    {
-      size_t node_id = 0;
-      for (const auto& node : node_list)
-      {
-        for (uint64_t id : node.vertex_id_info)
-          m_vertex_subscriptions[id].insert(node_id);
-        for (uint64_t id : node.cell_id_info)
-          m_cell_subscriptions[id].insert(node_id);
-        for (uint64_t id : node.aux_id_info)
-          m_aux_number_subscriptions[id].insert(node_id);
-        ++node_id;
-      }
-    }
-
-    std::pair<bool, size_t> FindNode(const NodeInfo& node)
-    {
-      for (uint64_t id : node.vertex_id_info)
-        for (size_t node_id : m_vertex_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
-
-      for (uint64_t id : node.cell_id_info)
-        for (size_t node_id : m_cell_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
-
-      for (uint64_t id : node.aux_id_info)
-        for (size_t node_id : m_aux_number_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
-
-//      size_t node_id = 0;
-//      for (const auto& list_node : m_node_list)
-//      {
-//        if (node == list_node)
-//            return std::make_pair(true, node_id);
-//        ++node_id;
-//      }
-
-      return std::make_pair(false,m_node_list.size());
-    }
-
-  };
-
-  /**Document this too.*/
-  class DynamicNodeFinder
-  {
-  private:
-    std::vector<NodeInfo> m_node_list;
-
-    std::map<uint64_t, std::set<size_t>> m_vertex_subscriptions;
-    std::map<uint64_t, std::set<size_t>> m_cell_subscriptions;
-    std::map<uint64_t, std::set<size_t>> m_aux_number_subscriptions;
-
-  public:
-    void reserve(size_t reserve_size)
-    {
-      m_node_list.reserve(reserve_size);
-    }
-
-    void push_back(const NodeInfo& node)
-    {
-      const size_t node_id = m_node_list.size();
-      m_node_list.push_back(node);
-
-      for (uint64_t id : node.vertex_id_info)
-        m_vertex_subscriptions[id].insert(node_id);
-
-      for (uint64_t id : node.cell_id_info)
-        m_cell_subscriptions[id].insert(node_id);
-
-      for (uint64_t id : node.aux_id_info)
-        m_aux_number_subscriptions[id].insert(node_id);
-    }
-
-    std::vector<NodeInfo>& data() {return m_node_list;}
-
-  public:
-    std::pair<bool, size_t> FindNode(const NodeInfo& node)
-    {
-      for (uint64_t id : node.vertex_id_info)
-        for (size_t node_id : m_vertex_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
-
-      for (uint64_t id : node.cell_id_info)
-        for (size_t node_id : m_cell_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
-
-      for (uint64_t id : node.aux_id_info)
-        for (size_t node_id : m_aux_number_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
-
-//      size_t node_id = 0;
-//      for (const auto& list_node : m_node_list)
-//      {
-//        if (node == list_node)
-//            return std::make_pair(true, node_id);
-//        ++node_id;
-//      }
-
-      return std::make_pair(false,m_node_list.size());
-    }
-
-  };
-
   const std::string fname = __FUNCTION__;
-  const uint64_t home = static_cast<uint64_t>(chi_mpi.location_id);
-  const size_t node_register_size = node_register_node_info.size();
+  typedef std::vector<NodeInfo> VecNodeInfo;
 
-  //============================================= Initialize node register
-  // We will later fill this register with a
-  // mapping to unique geometrical info
-  m_node_register_2_local_unique_map.assign(node_register_size, 0);
+  chi_log.Log(LOG_0) << "Assembling nodes";
+  MPI_Barrier(MPI_COMM_WORLD);
 
-  //============================================= Build node register and
-  //                                              get locally scoped unique
-  //                                              nodes
-  // This list will not contain any duplicates.
-  DynamicNodeFinder finder_local_scope_unique_nodes;
+  //============================================= Filter the local node register
+  NodeInfoListManager FLNR_manager;
+  {
+    for (const auto& node : LNR)
+    {
+      const auto location_info   = FLNR_manager.FindNode(node);
+      const bool   list_has_node = location_info.first;
+
+      if (not list_has_node) FLNR_manager.PushBack(node);
+    }
+  }
+  // FLNR = Filtered Local Node Register
+  const VecNodeInfo& FLNR = FLNR_manager.Data();
+
+  //============================================= Make Local Node Location List
+  // LNLL = Local Node Location List
+  m_LNLL.reserve(FLNR.size());
+  for (const auto& node : FLNR)
+    m_LNLL.push_back(node.location);
+
+  //============================================= Make LNR_id_2_LNLL_id_map
+  m_LNR_id_2_LNLL_id_map.assign(LNR.size(), 0);
   {
     size_t node_register_id = 0;
-    for (const auto& node : node_register_node_info)
+    for (const auto& node : LNR)
     {
-      const auto location_info   = finder_local_scope_unique_nodes.FindNode(node);
+      const auto location_info   = FLNR_manager.FindNode(node);
       const bool   list_has_node = location_info.first;
       const size_t list_position = location_info.second; //will be end if not found
 
-      if (not list_has_node) finder_local_scope_unique_nodes.push_back(node);
-
-      m_node_register_2_local_unique_map[node_register_id] = list_position;
+      if (list_has_node)
+        m_LNR_id_2_LNLL_id_map[node_register_id] = list_position;
+      else
+        throw std::logic_error(fname + ": Error in LNR_id_2_LNLL_id_map");
 
       ++node_register_id;
     }
-
-  }
-  const std::vector<NodeInfo>& local_scope_unique_nodes =
-    finder_local_scope_unique_nodes.data();
-
-  //============================================= Make m_local_unique_node_locations
-  m_local_unique_node_locations.reserve(local_scope_unique_nodes.size());
-  {
-    auto& location_list = m_local_unique_node_locations;
-    for (const auto& node : local_scope_unique_nodes)
-      location_list.push_back(node.location);
   }
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Number of local scope unique nodes: "
-//                       << local_scope_unique_nodes.size();
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Build partition mapped
-  //                                              ghost scope nodes
-  // This list will not contain any duplicates.
-  // If a duplicate is encountered, the node with
-  // the lowest partition-id will prevail.
-  std::vector<std::pair<NodeInfo,uint64_t>> ghost_scope_nodes_pids;
-  {
-    for (const auto& master_node_pid_pair : ghost_node_register_node_info)
-    {
-      const auto&   node = master_node_pid_pair.first;
-      const uint64_t pid = master_node_pid_pair.second;
-
-      bool node_already_there = false;
-      for (auto& node_pid_pair : ghost_scope_nodes_pids)
-        if (node_pid_pair.first == node)
-        {
-          node_already_there = true;
-          if (pid < node_pid_pair.second)
-            node_pid_pair = std::make_pair(node, pid);
-        }
-
-      if (not node_already_there)
-        ghost_scope_nodes_pids.emplace_back(node, pid);
-    }
-  }
-
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Number of ghost scope nodes: "
-//                       << ghost_scope_nodes_pids.size();
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Filter local scope and break
-  //                                              ties to get true local-nodes
-  //                                              and true ghost-nodes
+  //============================================= Filter ghost node register
+  // Eliminates duplicates. If a duplicate is
+  // encountered, the node with the lowest
+  // partition-id will prevail.
   //
-  std::vector<NodeInfo> true_local_nodes;
-  std::vector<std::pair<NodeInfo, uint64_t>> true_ghost_nodes;
+  // FGNR = Filtered Ghost Node Register
+  VecNodeInfoIDPair FGNR = FilterGhostNodeRegister(GNR);
+
+  //============================================= Make Ghost Node Location List
+  // GNLL = Ghost Node Location List
+  m_GNLL.reserve(FGNR.size());
+  for (const auto& node_id_info_pair: FGNR)
+    m_GNLL.push_back(node_id_info_pair.first.location);
+
+  //============================================= Make GNR_id_2_GNLL_id_map
+  m_GNR_id_2_GNLL_id_map.assign(GNR.size(), 0);
   {
-    const size_t num_lsu_nodes = local_scope_unique_nodes.size();
-    std::vector<bool> true_local_flags(num_lsu_nodes,true);
-
-    size_t num_ghosted_lsu_nodes = 0;
-    for (const auto& ghost_node_pid_pair : ghost_scope_nodes_pids)
+    const size_t FGNR_size = FGNR.size();
+    size_t node_register_id = 0;
+    for (const auto& node_info_id_pair : GNR)
     {
-      const auto&         node = ghost_node_pid_pair.first;
-      const uint64_t ghost_pid = ghost_node_pid_pair.second;
+      const auto& registery_node = node_info_id_pair.first;
 
-      const auto location_info   = finder_local_scope_unique_nodes.FindNode(node);
-      const bool   list_has_node = location_info.first;
-      const size_t list_position = location_info.second; //will be end if not found
-
-      if (list_has_node and home > ghost_pid)
+      // frid = filtered_register_id
+      for (size_t frid=0; frid<FGNR_size; ++frid)
       {
-        true_ghost_nodes.emplace_back(node, ghost_pid);
-        true_local_flags[list_position] = false;
-        ++num_ghosted_lsu_nodes;
+        const auto& filtered_registery_node = FGNR[frid].first;
+
+        if (registery_node == filtered_registery_node)
+          m_GNR_id_2_GNLL_id_map[node_register_id] = frid;
       }
-    }
-
-    const size_t num_est_true_local_nodes = num_lsu_nodes - num_ghosted_lsu_nodes;
-    true_local_nodes.reserve(num_est_true_local_nodes);
-
-    size_t node_id = 0;
-    for (const auto& node : local_scope_unique_nodes)
-    {
-      if (true_local_flags[node_id]) true_local_nodes.push_back(node);
-      ++node_id;
+      ++node_register_id;
     }
   }
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Number of true local nodes: "
-//                       << true_local_nodes.size()
-//                       << " and true ghost nodes "
-//                       << true_ghost_nodes.size();
-//  MPI_Barrier(MPI_COMM_WORLD);
+  //============================================= Subtract the filtered_GNR set
+  //                                              from the filtered_LNR to
+  //                                              determine true local nodes
+  // TLNR = True Local Node Register
+  VecNodeInfo TLNR = SubtractGNRFromLNR(FLNR_manager, FGNR);
 
-  // At this point we have a list of the true local nodes and a list of the
-  // true ghost-nodes and to which partition they belong.
-
-  // Next we map local node global addresses.
-
-  //============================================= Gather local node counts from
-  //                                              all processes
-  const size_t num_true_local_nodes = true_local_nodes.size();
-  std::vector<size_t> process_local_node_count(chi_mpi.process_count, 0);
-
-  MPI_Allgather(&num_true_local_nodes,           //sendbuf
-                1,                               //sendcount
-                MPI_UNSIGNED_LONG,               //send datatype
-                process_local_node_count.data(), //recvbuf
-                1,                               //recvcount
-                MPI_UNSIGNED_LONG,               //recv datatype,
-                MPI_COMM_WORLD);                 //communicator
-
-  //============================================= Create true local to global
-  //                                              node mapping
-  std::vector<int64_t> true_local_node_id_to_global_id_map;
-  {
-    true_local_node_id_to_global_id_map.assign(num_true_local_nodes, 0);
-    int64_t running_total_node_count = 0;
-    for (uint64_t pid=0; pid<static_cast<uint64_t>(chi_mpi.process_count); ++pid)
-    {
-      if (pid == home)
-      {
-        for (size_t i=0; i<num_true_local_nodes; ++i)
-          true_local_node_id_to_global_id_map[i] =
-            static_cast<int64_t>(running_total_node_count + i);
-        break;
-      }
-
-      running_total_node_count +=
-        static_cast<int64_t>(process_local_node_count[pid]);
-    }//for pid
-  }
-
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Creating true_local_node_id_to_global_id_map";
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Initialize node-register
-  //                                              local-id map
-  NodeFinder finder_true_local_node(true_local_nodes);
-  m_node_register_local_ids.assign(node_register_size, -1);
+  //============================================= Populate local node-register
+  //                                              local-ids
+  NodeListFindManager TLNR_finder(TLNR);
+  m_LNR_local_ids.assign(LNR.size(), -1);
   {
     uint64_t node_register_id = 0;
-    for (const auto& node : node_register_node_info)
+    for (const auto& node : LNR)
     {
-      auto location_info = finder_true_local_node.FindNode(node);
+      auto location_info = TLNR_finder.FindNode(node);
       const bool has_node   = location_info.first;
       const size_t local_id = location_info.second;
 
       if (has_node)
-        m_node_register_local_ids[node_register_id] =
-          static_cast<int64_t>(local_id);
+        m_LNR_local_ids[node_register_id] = static_cast<int64_t>(local_id);
 
       ++node_register_id;
     }
   }
 
-  // Now that we have local- and global-addresses for all true
-  // local nodes we can start the process of mapping the ghost nodes.
+  //============================================= Assign global-ids to all
+  //                                              true local nodes.
+  std::vector<int64_t> TLNR_id_to_global_id_map = CreateGlobalIDMapForLNR(TLNR);
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint A";
-//  MPI_Barrier(MPI_COMM_WORLD);
+  //============================================= Intersect FLNR and FGNR
+  VecNodeInfoIDPair IGNR = IntersectGNRWithLNR(FLNR_manager, FGNR);
 
-  //============================================= Consolidate ghost nodes
-  //                                              onto ghosted partitions
+  //============================================= Consolidate intersected ghost
+  //                                              nodes onto ghosted partitions
   // This helps us tell each of the neighboring
-  // partitions which nodes we want global addresses
-  // for
-  std::map<uint64_t, std::vector<NodeInfo>> true_ghost_nodes_consolidated;
-  {
-    for (const auto& ghost_node_pid : true_ghost_nodes)
-    {
-      const auto& node = ghost_node_pid.first;
-      uint64_t    pid  = ghost_node_pid.second;
+  // partitions which nodes we want global
+  // addresses for
+  std::map<uint64_t, VecNodeInfo> consolidated_IGNR = ConsolidateGNR(IGNR);
 
-      auto& node_list = true_ghost_nodes_consolidated[pid];
+  //============================================= Cross-communicate intersected
+  //                                              ghost nodes
+  LocINodeInfoMap IQNR = SerializeAndCommunicateGNR(consolidated_IGNR);
 
-      node_list.push_back(node);
-    }
-  }
-
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint B";
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Serialize consolidated ghost
-  //                                              nodes
-  // This serialized data will be communicated via
-  // an all-to-all process to provide each process
-  // with a list of pairs of info. Each pair will
-  // a querying partition-id and a list of nodes for
-  // which that partition needs global-ids.
-  typedef std::map<uint64_t, std::vector<std::byte>> MapPIDSerialData;
-
-  MapPIDSerialData true_ghost_nodes_serialized;
-  {
-    for (const auto& pid_ghost_list : true_ghost_nodes_consolidated)
-    {
-      const uint64_t                      pid = pid_ghost_list.first;
-      const std::vector<NodeInfo>& ghost_list = pid_ghost_list.second;
-
-      chi_data_types::ByteArray serialized_data;
-
-      serialized_data.Write<size_t>(ghost_list.size());
-
-      for (auto& ghost_node : ghost_list)
-        serialized_data.Append(ghost_node.Serialize());
-
-      true_ghost_nodes_serialized[pid] = serialized_data.Data();
-    }
-  }
-
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint C";
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Communicate serialized data
-  MapPIDSerialData query_pids_nodes_serialized =
-    ChiMPI2::MapAllToAll(true_ghost_nodes_serialized, MPI_BYTE);
-
-  //============================================= Convert/DeSerialize query data
-  //                                              to usable data
-  std::map<uint64_t, std::vector<NodeInfo>> query_pids_nodes;
-  {
-    for (auto& pid_serial_data : query_pids_nodes_serialized)
-    {
-      const uint64_t      pid = pid_serial_data.first;
-      auto& serial_data = pid_serial_data.second;
-
-      chi_data_types::ByteArray buffer(std::move(serial_data));
-
-      size_t address=0;
-      while (address < buffer.Size())
-      {
-        const size_t num_nodes = buffer.Read<size_t>(address, &address);
-
-        auto& node_list = query_pids_nodes[pid];
-        node_list.reserve(num_nodes);
-
-        for (size_t n=0; n<num_nodes; ++n)
-        {
-          node_list.emplace_back(NodeInfo::DeSerialize(buffer, address));
-        }
-      }
-    }
-  }
-
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint D";
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Map the query-nodes
+  //============================================= Map the intersected query-nodes
   // All the query nodes should be true local nodes
   // unless an error occurred upstream of this.
   // We simply have to lookup each query node in
   // the local list, get its local-id and then map
   // its global id.
-  std::map<uint64_t, std::vector<int64_t>> query_pids_nodes_mapped;
+  std::map<uint64_t, std::vector<int64_t>> IQNR_mapped;
   {
-    for (const auto& pid_node_list : query_pids_nodes)
+    for (const auto& pid_node_list : IQNR)
     {
       const uint64_t    pid = pid_node_list.first;
       const auto& node_list = pid_node_list.second;
 
-      auto& map_list = query_pids_nodes_mapped[pid];
+      auto& map_list = IQNR_mapped[pid];
       map_list.reserve(node_list.size());
 
       for (const auto& node : node_list)
       {
-        auto location_info = finder_true_local_node.FindNode(node);
+        auto location_info = TLNR_finder.FindNode(node);
         const bool has_node   = location_info.first;
         const size_t location = location_info.second;
 
         if (has_node)
-          map_list.push_back(true_local_node_id_to_global_id_map[location]);
+          map_list.push_back(TLNR_id_to_global_id_map[location]);
       }
     }
   }
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint E";
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Communicate back mapped nodes
+  //============================================= Communicate back IGNR nodes
   // Now that the query-nodes have been mapped we
   // have to send all this information back to the
   // query-partitions.
-  std::map<uint64_t, std::vector<int64_t>> ghost_pids_node_mapping =
-    ChiMPI2::MapAllToAll(query_pids_nodes_mapped, MPI_LONG_LONG_INT);
+  std::map<uint64_t, std::vector<int64_t>> consolidated_IGNR_mapping =
+    ChiMPI2::MapAllToAll(IQNR_mapped, MPI_LONG_LONG_INT);
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint FG";
-//  MPI_Barrier(MPI_COMM_WORLD);
-
-  //============================================= Make global mappings
+  //============================================= Make global mappings for LNR
   {
-    m_node_register_global_ids.assign(node_register_size, -1);
+    m_LNR_global_ids.assign(LNR.size(), -1);
 
     uint64_t node_register_id = 0;
-    for (const auto& node : node_register_node_info)
+    for (const auto& node : LNR)
     {
-      //=============================== Search true_local_nodes
+      //=============================== Search True Local Nodes
       {
-        const auto location_info = finder_true_local_node.FindNode(node);
+        const auto location_info = TLNR_finder.FindNode(node);
         const bool   list_has_node = location_info.first;
         const size_t list_position = location_info.second; //will be end if not found
 
         if (list_has_node)
         {
-          m_node_register_global_ids[node_register_id] =
-            true_local_node_id_to_global_id_map[list_position];
-          goto next_node_register;
+          m_LNR_global_ids[node_register_id] =
+            TLNR_id_to_global_id_map[list_position];
+          goto next_local_node;
         }
       }
 
-      //=============================== Search consolidated true_ghosts
-      for (const auto& pid_node_list : true_ghost_nodes_consolidated)
+      //=============================== Search consolidated Ghost Node Register
+      for (const auto& pid_node_list : consolidated_IGNR)
       {
         const uint64_t    pid = pid_node_list.first;
         const auto& node_list = pid_node_list.second;
-        const auto& node_map  = ghost_pids_node_mapping.at(pid);
+        const auto& node_map  = consolidated_IGNR_mapping.at(pid);
 
         for (size_t n=0; n<node_list.size(); ++n)
           if (node_list[n] == node)
           {
-            m_node_register_global_ids[node_register_id] = node_map[n];
-            goto end_of_ghost_loop;
+            m_LNR_global_ids[node_register_id] = node_map[n];
+            goto next_local_node;
           }
       }//for each ghost list
-      end_of_ghost_loop:;
 
-      next_node_register: ++node_register_id;
-    }//for node in node_register
+      next_local_node: ++node_register_id;
+    }//for node in LNR
   }
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Checkpoint H";
-//  MPI_Barrier(MPI_COMM_WORLD);
+  //============================================= Consolidate filtered ghost
+  //                                              nodes onto ghosted partitions
+  // This helps us tell each of the neighboring
+  // partitions which nodes we want global
+  // addresses for
+  std::map<uint64_t, VecNodeInfo> consolidated_FGNR = ConsolidateGNR(FGNR);
+
+  //============================================= Cross-communicate filtered
+  //                                              ghost nodes
+  LocINodeInfoMap FQNR = SerializeAndCommunicateGNR(consolidated_FGNR);
+
+  //============================================= Map the filtered query-nodes
+  // The query nodes here will be either true local
+  // nodes or intersected ghost nodes. We need to
+  // search both these list to find the mapping
+  std::map<uint64_t, std::vector<int64_t>> FQNR_mapped;
+  {
+    NodeListFindManager LNR_finder(LNR);
+
+    for (const auto& fqnr_pid_node_list : FQNR)
+    {
+      const uint64_t    fqnr_pid = fqnr_pid_node_list.first;
+      const auto& fqnr_node_list = fqnr_pid_node_list.second;
+
+      auto& fqnr_map_list = FQNR_mapped[fqnr_pid];
+      fqnr_map_list.reserve(fqnr_node_list.size());
+
+      for (const auto& fqnr_node : fqnr_node_list)
+      {
+        auto location_info = LNR_finder.FindNode(fqnr_node);
+        const bool has_node   = location_info.first;
+        const size_t LNR_id = location_info.second;
+
+        if (has_node)
+          fqnr_map_list.push_back(m_LNR_global_ids[LNR_id]);
+        else
+          throw std::logic_error(fname + ": Query node mapping failure.");
+      }
+    }
+  }
+
+  //============================================= Communicate back mapped nodes
+  // Now that the query-nodes have been mapped we
+  // have to send all this information back to the
+  // query-partitions.
+  std::map<uint64_t, std::vector<int64_t>> consolidated_FGNR_mapping =
+    ChiMPI2::MapAllToAll(FQNR_mapped, MPI_LONG_LONG_INT);
+
+  //============================================= Make global mappings for GNR
+  {
+    m_GNR_global_ids.assign(GNR.size(), -1);
+
+    uint64_t node_register_id = 0;
+    for (const auto& node_info_id_pair : GNR)
+    {
+      const auto& node = node_info_id_pair.first;
+
+      //=============================== Search consolidated Ghost Node Register
+      for (const auto& pid_node_list : consolidated_FGNR)
+      {
+        const uint64_t    pid = pid_node_list.first;
+        const auto& node_list = pid_node_list.second;
+        const auto& node_map  = consolidated_FGNR_mapping.at(pid);
+
+        for (size_t n=0; n<node_list.size(); ++n)
+          if (node_list[n] == node)
+          {
+            m_GNR_global_ids[node_register_id] = node_map[n];
+            goto next_ghost_node;
+          }
+      }//for each ghost list
+
+      next_ghost_node: ++node_register_id;
+    }//for node-id pair in GNR
+  }
 
   //============================================= Check global-id map
   size_t num_invalid_global_ids = 0;
-  for (int64_t value : m_node_register_global_ids)
+  for (int64_t value : m_LNR_global_ids)
+    if (value < 0) ++num_invalid_global_ids;
+
+  for (int64_t value : m_GNR_global_ids)
     if (value < 0) ++num_invalid_global_ids;
 
   if (num_invalid_global_ids > 0)
@@ -520,11 +411,5 @@ void chi_math::finite_element::SpatialDiscretization::
                            std::to_string(num_invalid_global_ids) +
                            " nodes in the node register do not have "
                            "global ids.");
-
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Number of local nodes and cells: "
-//                       << num_true_local_nodes << " "
-//                       << m_grid->local_cells.size();
-//  MPI_Barrier(MPI_COMM_WORLD);
 
 }

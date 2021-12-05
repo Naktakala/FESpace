@@ -46,10 +46,6 @@ protected:
     return node_register_size + num_nodes;
   }
 
-
-public:
-//  virtual std::vector<NodeInfo> GetNodeInfo() const = 0;
-
 public: //Virtual functions - needing definitions
   /**Returns the locations of the nodes associated with a given cell.*/
   virtual
@@ -115,6 +111,12 @@ public: //Non-virtual functions
   virtual ~FiniteElementMapping() = default;
 
   const chi_mesh::Cell& ReferenceCell() const {return m_cell;}
+
+public:
+  uint64_t MapNodeRegister(size_t node_index)
+  {
+    return m_local_node_register.at(node_index);
+  }
 };
 
 typedef std::unique_ptr<FiniteElementMapping> FEMappingPtr;

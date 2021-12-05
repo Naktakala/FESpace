@@ -21,9 +21,6 @@ namespace chi_math::finite_element
                     const chi_mesh::MeshContinuum& grid,
                     std::vector<NodeInfo>& node_list);
 
-  public:
-//    std::vector<NodeInfo> GetNodeInfo() const override;
-
   public: //Overriding functions
     std::vector<chi_mesh::Vector3>
     CellNodeLocations(const chi_mesh::Cell& cell) const override;

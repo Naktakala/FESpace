@@ -19,9 +19,6 @@ namespace chi_math::finite_element
                  std::vector<NodeInfo>& node_list);
 
   public:
-//    std::vector<NodeInfo> GetNodeInfo() const override;
-
-  public:
     std::vector<chi_mesh::Vector3>
     CellNodeLocations(const chi_mesh::Cell& cell) const override;
 
