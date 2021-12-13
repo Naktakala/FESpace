@@ -127,7 +127,7 @@ void chi_math::finite_element::SpatialDiscretization::
   const std::string fname = __FUNCTION__;
   typedef std::vector<NodeInfo> VecNodeInfo;
 
-  chi_log.Log(LOG_0) << "Assembling nodes";
+  chi_log.Log(LOG_0) << "Spatial Discretization: Assembling nodes";
   MPI_Barrier(MPI_COMM_WORLD);
 
   //============================================= Filter the local node register
@@ -135,10 +135,10 @@ void chi_math::finite_element::SpatialDiscretization::
   {
     for (const auto& node : LNR)
     {
-      const auto location_info   = FLNR_manager.FindNode(node);
-      const bool   list_has_node = location_info.first;
+      const auto [list_has_node, list_position] = FLNR_manager.FindNode(node);
 
-      if (not list_has_node) FLNR_manager.PushBack(node);
+      if (not list_has_node)
+        FLNR_manager.PushBack(node);
     }
   }
   // FLNR = Filtered Local Node Register
@@ -156,9 +156,7 @@ void chi_math::finite_element::SpatialDiscretization::
     size_t node_register_id = 0;
     for (const auto& node : LNR)
     {
-      const auto location_info   = FLNR_manager.FindNode(node);
-      const bool   list_has_node = location_info.first;
-      const size_t list_position = location_info.second; //will be end if not found
+      const auto [list_has_node, list_position]   = FLNR_manager.FindNode(node);
 
       if (list_has_node)
         m_LNR_id_2_LNLL_id_map[node_register_id] = list_position;
@@ -231,7 +229,11 @@ void chi_math::finite_element::SpatialDiscretization::
 
   //============================================= Assign global-ids to all
   //                                              true local nodes.
-  std::vector<int64_t> TLNR_id_to_global_id_map = CreateGlobalIDMapForLNR(TLNR);
+  int64_t num_global_nodes = 0;
+  std::vector<int64_t> TLNR_id_to_global_id_map =
+    CreateGlobalIDMapForLNR(TLNR, num_global_nodes);
+  m_num_local_nodes = static_cast<int64_t>(TLNR.size());
+  m_num_global_nodes = num_global_nodes;
 
   //============================================= Intersect FLNR and FGNR
   VecNodeInfoIDPair IGNR = IntersectGNRWithLNR(FLNR_manager, FGNR);
@@ -255,19 +257,14 @@ void chi_math::finite_element::SpatialDiscretization::
   // its global id.
   std::map<uint64_t, std::vector<int64_t>> IQNR_mapped;
   {
-    for (const auto& pid_node_list : IQNR)
+    for (const auto& [pid, node_list] : IQNR)
     {
-      const uint64_t    pid = pid_node_list.first;
-      const auto& node_list = pid_node_list.second;
-
       auto& map_list = IQNR_mapped[pid];
       map_list.reserve(node_list.size());
 
       for (const auto& node : node_list)
       {
-        auto location_info = TLNR_finder.FindNode(node);
-        const bool has_node   = location_info.first;
-        const size_t location = location_info.second;
+        const auto [has_node, location] = TLNR_finder.FindNode(node);
 
         if (has_node)
           map_list.push_back(TLNR_id_to_global_id_map[location]);
@@ -291,9 +288,7 @@ void chi_math::finite_element::SpatialDiscretization::
     {
       //=============================== Search True Local Nodes
       {
-        const auto location_info = TLNR_finder.FindNode(node);
-        const bool   list_has_node = location_info.first;
-        const size_t list_position = location_info.second; //will be end if not found
+        const auto [list_has_node, list_position] = TLNR_finder.FindNode(node);
 
         if (list_has_node)
         {
@@ -304,10 +299,8 @@ void chi_math::finite_element::SpatialDiscretization::
       }
 
       //=============================== Search consolidated Ghost Node Register
-      for (const auto& pid_node_list : consolidated_IGNR)
+      for (const auto& [pid, node_list] : consolidated_IGNR)
       {
-        const uint64_t    pid = pid_node_list.first;
-        const auto& node_list = pid_node_list.second;
         const auto& node_map  = consolidated_IGNR_mapping.at(pid);
 
         for (size_t n=0; n<node_list.size(); ++n)
@@ -341,11 +334,8 @@ void chi_math::finite_element::SpatialDiscretization::
   {
     NodeListFindManager LNR_finder(LNR);
 
-    for (const auto& fqnr_pid_node_list : FQNR)
+    for (const auto& [fqnr_pid, fqnr_node_list] : FQNR)
     {
-      const uint64_t    fqnr_pid = fqnr_pid_node_list.first;
-      const auto& fqnr_node_list = fqnr_pid_node_list.second;
-
       auto& fqnr_map_list = FQNR_mapped[fqnr_pid];
       fqnr_map_list.reserve(fqnr_node_list.size());
 
@@ -398,6 +388,36 @@ void chi_math::finite_element::SpatialDiscretization::
     }//for node-id pair in GNR
   }
 
+  //============================================= Subtract TLNR from FGNR and
+  //                                              collect ghost global-ids
+  VecNodeInfoIDPair TGNR = SubtractLNRFromGNR(TLNR_finder, GNR);
+
+  m_ghost_global_ids.reserve(TGNR.size());
+  for (const auto& tgnr_node_pid_pair : TGNR)
+  {
+    const auto& tgnr_node = tgnr_node_pid_pair.first;
+
+    int64_t tgnr_node_global_id = -1;
+
+    uint64_t gnr_id = 0;
+    for (const auto& gnr_node_pid_pair : GNR)
+    {
+      const auto& gnr_node = gnr_node_pid_pair.first;
+
+      if (tgnr_node == gnr_node)
+      {
+        tgnr_node_global_id = m_GNR_global_ids[gnr_id];
+        break;
+      }
+      ++gnr_id;
+    }
+
+    if (tgnr_node_global_id < 0)
+      throw std::logic_error(fname + ": Error creating m_ghost_global_ids.");
+
+    m_ghost_global_ids.push_back(tgnr_node_global_id);
+  }
+
   //============================================= Check global-id map
   size_t num_invalid_global_ids = 0;
   for (int64_t value : m_LNR_global_ids)
@@ -411,5 +431,4 @@ void chi_math::finite_element::SpatialDiscretization::
                            std::to_string(num_invalid_global_ids) +
                            " nodes in the node register do not have "
                            "global ids.");
-
 }

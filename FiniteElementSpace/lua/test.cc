@@ -1,11 +1,12 @@
 #include "fe_lua_utils.h"
 
-#include "fe_space.h"
-#include "Methods/FiniteVolume/fv_mapping.h"
-#include "Methods/PiecewiseLinear/pwl_mapping.h"
-#include "Methods/Lagrange/lagrange_mapping.h"
-
 #include "ChiMesh/MeshHandler/chi_meshhandler.h"
+
+#include "FiniteElementSpace/Methods/PiecewiseLinear/pwl_mapping.h"
+#include "FiniteElementSpace/Methods/Lagrange/lagrange_mapping.h"
+#include "FiniteElementSpace/Methods/FiniteVolume/fv_mapping.h"
+
+#include "DiffusionTest/diffusion_solver.h"
 
 #include "ChiLog/chi_log.h"
 
@@ -19,83 +20,42 @@ int chi_math::lua_utils::chiFESpaceTest(lua_State *L)
 
   using namespace chi_math::finite_element;
 
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "Number of Local cells: " << grid->local_cells.size();
-//  MPI_Barrier(MPI_COMM_WORLD);
-//  chi_log.Log(LOG_ALL) << "\n";
+  auto pwl_sdm  = FiniteElementSpace<PiecewiseLinear>::New(grid);
+  auto pwld_sdm = FiniteElementSpace<PiecewiseLinear>::New(grid);
+  auto q2_sdm   = FiniteElementSpace<LagrangeQ2>::New(grid);
+  auto fv_sdm   = FiniteElementSpace<FiniteVolume>::New(grid);
 
-//  //============================================= FV
-//  {
-//    SpatialDiscretizationPtr fe_ptr;
-//    fe_ptr = FiniteElementSpace<FiniteVolume>::New(grid);
-//    auto& fe = *fe_ptr;
-//
-//    size_t c=0;
-//    for (const auto& cell : fe.Grid().local_cells)
-//    {
-//      size_t num_nodes = fe.GetCellNumNodes(cell);
-//      auto node_positions = fe.GetCellNodeLocations(cell);
-////      for (size_t i=0; i<num_nodes; ++i)
-////        chi_log.Log()
-////        << "cell " << cell.local_id
-////        << " node " << i
-////        << " position=" << node_positions[i].PrintS();
-//      ++c;
-//      if (c>3) break;
-//    }
-//
-//    fe.SetTextName("FV Space");
-//
-//    chi_log.Log() << "Created " << fe.TextName();
-//  }
-
-  //============================================= PWL
+  //=================================== Unit testing stuff
+  pwl_sdm->SetTextName("PWL-Spatial Discretization");
+  chi_log.Log() << pwl_sdm->TextName();
   {
-    FiniteElementSpace<PiecewiseLinear> fe(grid);
-
-    size_t c=0;
-    for (const auto& cell : fe.Grid().local_cells)
+    const auto& pwl_grid = pwl_sdm->Grid();
+    double total_volume = 0.0;
+    double total_area = 0.0;
+    size_t total_face_nodes = 0;
+    size_t total_num_nodes = 0;
+    for (const auto& cell : pwl_grid.local_cells)
     {
-      size_t num_nodes = fe.GetCellNumNodes(cell);
-      auto node_positions = fe.GetCellNodeLocations(cell);
-//      for (size_t i=0; i<num_nodes; ++i)
-//        chi_log.Log()
-//        << "cell " << cell.local_id
-//        << " node " << i
-//        << " position=" << node_positions[i].PrintS();
-      ++c;
-      if (c>3) break;
+      total_volume += pwl_sdm->GetCellVolume(cell);
+      for (size_t f=0; f<cell.faces.size(); ++f)
+      {
+        total_area += pwl_sdm->GetCellFaceArea(cell, f);
+        total_face_nodes += pwl_sdm->GetFaceNumNodes(cell, f);
+      }
+      total_num_nodes += pwl_sdm->GetCellNumNodes(cell);
+
+      const auto node_locations = pwl_sdm->GetCellNodeLocations(cell);
     }
-
-    fe.SetTextName("FE Space");
-
-
-    chi_log.Log() << "Created " << fe.TextName();
   }
 
-  //============================================= Q2
-  {
-    FiniteElementSpace<LagrangeQ2> fe(grid);
+//  pwl_sdm.ComputeUnitIntegrals();
+//  pwl_sdm.InitializeQuadraturePoints();
 
-    size_t c=0;
-    for (const auto& cell : fe.Grid().local_cells)
-    {
-      size_t num_nodes = fe.GetCellNumNodes(cell);
-      auto node_positions = fe.GetCellNodeLocations(cell);
-//      for (size_t i=0; i<num_nodes; ++i)
-//        chi_log.Log()
-//        << "cell " << cell.local_id
-//        << " node " << i
-//        << " position=" << node_positions[i].PrintS();
-      ++c;
-      if (c>3) break;
-    }
+  DiffusionSolver diffusion_solver;
+  diffusion_solver.basic_options["SDM"].SetStringValue("PWL");
+  diffusion_solver.SetSpatialDiscretization(q2_sdm);
 
-    fe.SetTextName("FE Q2 Space");
-
-
-    chi_log.Log() << "Created " << fe.TextName();
-  }
+  diffusion_solver.Initialize();
 
   chi_log.Log() << "\nDone executing chiFESpaceTest\n\n";
 

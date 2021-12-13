@@ -16,9 +16,6 @@ namespace chi_math::finite_element
   public:
     PiecewiseLinear(const chi_mesh::Cell& cell,
                     const chi_mesh::MeshContinuum& grid,
-                    size_t& node_register_size);
-    PiecewiseLinear(const chi_mesh::Cell& cell,
-                    const chi_mesh::MeshContinuum& grid,
                     std::vector<NodeInfo>& node_list);
 
   public: //Overriding functions

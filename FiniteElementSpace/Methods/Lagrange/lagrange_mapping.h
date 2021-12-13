@@ -10,10 +10,11 @@ namespace chi_math::finite_element
   /**Lagrange mapping class.*/
   class LagrangeQ2 : public FiniteElementMapping
   {
+  protected:
+    typedef unsigned int uint;
+    std::vector<uint>              m_face_num_nodes;
+    std::vector<std::vector<uint>> m_face_2_cell_map;
   public:
-    LagrangeQ2(const chi_mesh::Cell& cell,
-               const chi_mesh::MeshContinuum& grid,
-               size_t& node_register_size);
     LagrangeQ2(const chi_mesh::Cell& cell,
                const chi_mesh::MeshContinuum& grid,
                std::vector<NodeInfo>& node_list);

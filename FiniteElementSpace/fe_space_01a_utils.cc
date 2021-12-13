@@ -45,7 +45,7 @@ VecNodeInfoIDPair SpatialDiscretization::
  * LNR, and if the pid-part of the same node-pid pair is less than the local
  * partition-id.*/
 std::vector<NodeInfo> SpatialDiscretization::
-  SubtractGNRFromLNR(NodeInfoListManager &LNR_manager,
+  SubtractGNRFromLNR(const NodeInfoListManager &LNR_manager,
                      const VecNodeInfoIDPair &GNR)
 {
   auto& chi_mpi = ChiMPI::GetInstance();
@@ -96,8 +96,8 @@ std::vector<NodeInfo> SpatialDiscretization::
  * node in the LNR, and if the pid-part of the same node-pid pair is less than
  * the local partition-id.*/
 VecNodeInfoIDPair SpatialDiscretization::
-  IntersectGNRWithLNR(NodeInfoListManager &LNR_manager,
-                     const VecNodeInfoIDPair &GNR)
+  IntersectGNRWithLNR(const NodeInfoListManager &LNR_manager,
+                      const VecNodeInfoIDPair &GNR)
 {
   auto& chi_mpi = ChiMPI::GetInstance();
 
@@ -217,7 +217,8 @@ LocINodeInfoMap SpatialDiscretization::
 /**Given a list of true local nodes, this routine stacks local nodes
  * from all partitions to determine global ids for all the local nodes.*/
 std::vector<int64_t> SpatialDiscretization::
-  CreateGlobalIDMapForLNR(const std::vector<NodeInfo> &TLNR)
+  CreateGlobalIDMapForLNR(const std::vector<NodeInfo> &TLNR,
+                          int64_t& num_global_nodes)
 {
   auto& chi_mpi = ChiMPI::GetInstance();
 
@@ -255,5 +256,42 @@ std::vector<int64_t> SpatialDiscretization::
     }//for pid
   }
 
+  //============================================= Compute number of global nodes
+  num_global_nodes = 0;
+  for (uint64_t pid=0; pid<static_cast<uint64_t>(chi_mpi.process_count); ++pid)
+    num_global_nodes += locI_num_TLN[pid];
+
   return TLN_id_to_global_id_map;
+}
+
+
+//###################################################################
+/**Make a new list of local nodes (`NodeInfo`) by not adding nodes from the LNR
+ * having duplicates in the GNR. A node-pid pair in the GNR is considered a
+ * duplicate if the NodeInfo-part of the node-pid pair matches a node in the
+ * LNR, and if the pid-part of the same node-pid pair is less than the local
+ * partition-id.*/
+VecNodeInfoIDPair SpatialDiscretization::
+  SubtractLNRFromGNR(const NodeListFindManager &LNR_manager,
+                     const VecNodeInfoIDPair &GNR)
+{
+  auto& chi_mpi = ChiMPI::GetInstance();
+
+  VecNodeInfoIDPair SGNR; // Subtracted GNR
+  SGNR.reserve(GNR.size());
+
+  for (const auto& gnr_node_info_id_pair : GNR)
+  {
+    const auto& gnr_node = gnr_node_info_id_pair.first;
+    const auto& gnr_pid  = gnr_node_info_id_pair.second;
+
+    const auto   lnr_find_info     = LNR_manager.FindNode(gnr_node);
+    const bool   lnr_list_has_node = lnr_find_info.first;
+
+    if (not lnr_list_has_node)
+      SGNR.push_back(gnr_node_info_id_pair);
+  }
+
+  SGNR.shrink_to_fit();
+  return SGNR;
 }

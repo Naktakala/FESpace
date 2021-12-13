@@ -10,21 +10,6 @@ using namespace chi_math::finite_element;
 FiniteVolume::
   FiniteVolume(const chi_mesh::Cell& cell,
                const chi_mesh::MeshContinuum& grid,
-               size_t& node_register_size) :
-               FiniteElementMapping(cell, grid)
-{
-  node_register_size = SetNumNodesAndLocalRegister(1, node_register_size);
-
-  auto cell_info = chi_mesh::ComputeCellVolumeAndFaceAreas(cell, grid);
-  m_volume = cell_info.volume;
-  m_face_areas = std::move(cell_info.face_areas);
-}
-
-//###################################################################
-/**Constructs a Finite Volume mapping of a cell.*/
-FiniteVolume::
-  FiniteVolume(const chi_mesh::Cell& cell,
-               const chi_mesh::MeshContinuum& grid,
                std::vector<NodeInfo>& node_list) :
                FiniteElementMapping(cell, grid)
 {

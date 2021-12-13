@@ -37,27 +37,48 @@ namespace chi_math::finite_element
     std::vector<int64_t>             m_LNR_local_ids;
     std::vector<int64_t>             m_LNR_global_ids;
 
+    std::vector<int64_t>             m_GNR_local_ids;
     std::vector<int64_t>             m_GNR_global_ids;
+
+    std::vector<int64_t>             m_ghost_global_ids;
+
+    int64_t                          m_num_local_nodes = 0;
+    int64_t                          m_num_global_nodes = 0;
+
+    typedef std::pair<chi_mesh::CellType, unsigned int/*order*/> QuadratureKey;
+    std::map<QuadratureKey, Quadrature> m_quadrature_stack;
 
   protected:
     explicit
     SpatialDiscretization(chi_mesh::MeshContinuumPtr& in_grid) :
       m_grid(in_grid) {}
 
+    const FiniteElementMapping& GetCellMapping(const chi_mesh::Cell& cell) const;
+
+  public:
+    /**Returns the text name associated with this space.*/
+    std::string TextName() const {return m_text_name;}
+
+    /**Sets the text name to be associated with this space.*/
+    void SetTextName(const std::string& text_name) {m_text_name = text_name;}
+
+  protected:
+  //01
     void AssembleNodes(
       const std::vector<NodeInfo>& LNR,
       const VecNodeInfoIDPair& GNR);
 
+  //01a
   private:
    static VecNodeInfoIDPair FilterGhostNodeRegister(
       const VecNodeInfoIDPair& GNR);
 
    static std::vector<NodeInfo> SubtractGNRFromLNR(
-     NodeInfoListManager& LNR_manager,
+     const NodeInfoListManager& LNR_manager,
      const VecNodeInfoIDPair& GNR);
 
    static VecNodeInfoIDPair IntersectGNRWithLNR(
-     NodeInfoListManager& LNR_manager,
+     const NodeInfoListManager& LNR_manager,
      const VecNodeInfoIDPair& GNR);
 
    static LocINodeInfoMap
@@ -67,60 +88,100 @@ namespace chi_math::finite_element
     SerializeAndCommunicateGNR(const LocINodeInfoMap& consolidated_GNR);
 
    static std::vector<int64_t> CreateGlobalIDMapForLNR(
-     const std::vector<NodeInfo>& LNR);
+     const std::vector<NodeInfo>& LNR,
+     int64_t& num_global_nodes);
+
+   static VecNodeInfoIDPair SubtractLNRFromGNR(
+     const NodeListFindManager& LNR_manager,
+     const VecNodeInfoIDPair& GNR);
+
   public:
     /**Returns the grid associated with this space.*/
     const chi_mesh::MeshContinuum& Grid() const {return *m_grid;}
 
+    //02 utils
     /**Gets the volume of the requested cell.*/
-    double GetCellVolume(const chi_mesh::Cell& cell)
-    {
-      return m_local_cell_mappings[cell.local_id]->Volume();
-    }
+    double GetCellVolume(const chi_mesh::Cell& cell);
 
-    double GetCellFaceArea(const chi_mesh::Cell& cell, size_t face_index)
-    {
-      return m_local_cell_mappings[cell.local_id]->FaceArea(face_index);
-    }
+    double GetCellFaceArea(const chi_mesh::Cell& cell, size_t face_index);
 
     /**Gets the number of nodes (not DOFs) for the
      * requested cell.*/
-    size_t GetCellNumNodes(const chi_mesh::Cell& cell)
-    {
-      return m_local_cell_mappings[cell.local_id]->NumNodes();
-    }
+    size_t GetCellNumNodes(const chi_mesh::Cell& cell);
 
     /**Gets the number of nodes (not DOFs) for the
      * requested cell-face pair.*/
-    size_t GetFaceNumNodes(const chi_mesh::Cell& cell, size_t face)
-    {
-      return m_local_cell_mappings[cell.local_id]->FaceNumNodes(cell, face);
-    }
+    size_t GetFaceNumNodes(const chi_mesh::Cell& cell, size_t face);
 
     /**Returns the locations of all the nodes of the cell
      * consistent with the supplied mapping.*/
     std::vector<chi_mesh::Vector3>
-    GetCellNodeLocations(const chi_mesh::Cell& cell)
-    {
-      return m_local_cell_mappings[cell.local_id]->CellNodeLocations(cell);
-    }
+      GetCellNodeLocations(const chi_mesh::Cell& cell);
 
-    /**Returns the text name associated with this space.*/
-    std::string TextName() const {return m_text_name;}
+    std::vector<size_t> CellNodeIndices(const chi_mesh::Cell& cell) const;
 
-    /**Sets the text name to be associated with this space.*/
-    void SetTextName(const std::string& text_name) {m_text_name = text_name;}
+    //03
+    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+      BuildNodalContinuousFESparsityPattern() const;
 
-    //02
+    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+      BuildCFEMSparsityPattern(
+        const chi_math::UnknownManager& unknown_manager) const;
+
+//    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+//      BuildNodalDFEMSparsityPattern() const;
+//
+//    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+//      BuildDFEMSparsityPattern(
+//        const chi_math::UnknownManager& unknown_manager) const;
+//
+//    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+//      BuildNodalFVSparsityPattern() const;
+
+    //04
+    int64_t NumLocalNodes() const {return m_num_local_nodes;}
+    int64_t NumGlobalNodes() const {return m_num_global_nodes;}
+
     int64_t MapNodeLocal(const chi_mesh::Cell& cell, size_t node_index) const;
     int64_t MapNodeGlobal(const chi_mesh::Cell& cell, size_t node_index) const;
 
-    std::vector<size_t> CellNodeIndices(const chi_mesh::Cell& cell) const;
+    int64_t NumLocalDOFs(const chi_math::UnknownManager& unknown_manager) const;
+    int64_t NumGlobalDOFs(const chi_math::UnknownManager& unknown_manager) const;
+
+    int64_t MapDOFLocal(const chi_mesh::Cell& cell,
+                        size_t node_index,
+                        const chi_math::UnknownManager& unknown_manager,
+                        unsigned int unknown_id,
+                        unsigned int component) const;
+
+    int64_t MapDOFGlobal(const chi_mesh::Cell& cell,
+                         size_t node_index,
+                         const chi_math::UnknownManager& unknown_manager,
+                         unsigned int unknown_id,
+                         unsigned int component) const;
+
+    std::vector<int64_t>
+      MapDOFsLocal(const chi_mesh::Cell& cell,
+                   const chi_math::UnknownManager& unknown_manager,
+                   unsigned int unknown_id,
+                   unsigned int component) const;
+    std::vector<int64_t>
+      MapDOFsGlobal(const chi_mesh::Cell& cell,
+                    const chi_math::UnknownManager& unknown_manager,
+                    unsigned int unknown_id,
+                    unsigned int component) const;
+
+    std::vector<int64_t>
+      GetGhostNodesGlobalIDs() const {return m_ghost_global_ids;}
+
+    std::vector<int64_t>
+      GetGhostDOFsGlobalIDs(
+        const chi_math::UnknownManager& unknown_manager) const;
 
     virtual ~SpatialDiscretization() = default;
   };
 
-  typedef std::unique_ptr<SpatialDiscretization> SpatialDiscretizationPtr;
+  typedef std::shared_ptr<SpatialDiscretization> SpatialDiscretizationPtr;
 }
 
 namespace chi_math::finite_element

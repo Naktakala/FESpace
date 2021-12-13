@@ -10,43 +10,6 @@ using namespace chi_math::finite_element;
 PiecewiseLinear::
   PiecewiseLinear(const chi_mesh::Cell& cell,
                   const chi_mesh::MeshContinuum& grid,
-                  size_t& node_register_size) :
-                  FiniteElementMapping(cell, grid)
-{
-  const size_t num_verts = cell.vertex_ids.size();
-
-  node_register_size = SetNumNodesAndLocalRegister(num_verts, node_register_size);
-
-  auto cell_info = chi_mesh::ComputeCellVolumeAndFaceAreas(cell, grid);
-  m_volume = cell_info.volume;
-  m_face_areas = std::move(cell_info.face_areas);
-
-  //======================================== Making vertex-id to cell-node map
-  // This is done to make the face_2_cell
-  // mapping more efficient
-  std::map<uint64_t, uint> cell_node_id_2_node_index_map;
-  uint node_index=0;
-  for (uint64_t node_id : cell.vertex_ids)
-    cell_node_id_2_node_index_map[node_id] = node_index++;
-
-  //======================================== Build face_2_cell node map
-  m_face_2_cell_map.reserve(cell.faces.size());
-  for (auto& face : cell.faces)
-  {
-    std::vector<uint> face_node_map;
-    face_node_map.reserve(face.vertex_ids.size());
-    for (uint64_t fnode_id : face.vertex_ids)
-      face_node_map.push_back(cell_node_id_2_node_index_map.at(fnode_id));
-
-    m_face_2_cell_map.push_back(std::move(face_node_map));
-  }//for face
-}
-
-//###################################################################
-/**Constructs a Piecewise linear mapping of a cell.*/
-PiecewiseLinear::
-  PiecewiseLinear(const chi_mesh::Cell& cell,
-                  const chi_mesh::MeshContinuum& grid,
                   std::vector<NodeInfo>& node_list) :
                   FiniteElementMapping(cell, grid)
 {

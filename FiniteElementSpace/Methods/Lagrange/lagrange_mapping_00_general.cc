@@ -6,68 +6,43 @@ using namespace chi_math::finite_element;
 
 LagrangeQ2::LagrangeQ2(const chi_mesh::Cell &cell,
                        const chi_mesh::MeshContinuum &grid,
-                       size_t& node_register_size) :
-                       FiniteElementMapping(cell, grid)
-{
-  if (cell.SubType() == chi_mesh::CellType::SLAB)
-  {
-    node_register_size = SetNumNodesAndLocalRegister(3, node_register_size);
-  }
-  else if (cell.SubType() == chi_mesh::CellType::TRIANGLE)
-  {
-    node_register_size = SetNumNodesAndLocalRegister(6, node_register_size);
-  }
-  else if (cell.SubType() == chi_mesh::CellType::QUADRILATERAL)
-  {
-    node_register_size = SetNumNodesAndLocalRegister(9, node_register_size);
-  }
-  else if (cell.SubType() == chi_mesh::CellType::TETRAHEDRON)
-  {
-    node_register_size = SetNumNodesAndLocalRegister(10, node_register_size);
-  }
-  else if (cell.SubType() == chi_mesh::CellType::HEXAHEDRON)
-  {
-    node_register_size = SetNumNodesAndLocalRegister(27, node_register_size);
-  }
-  else
-    throw std::logic_error(std::string(__FUNCTION__) +
-                           "Unsupported cell-type encountered.");
-
-}
-
-LagrangeQ2::LagrangeQ2(const chi_mesh::Cell &cell,
-                       const chi_mesh::MeshContinuum &grid,
                        std::vector<NodeInfo>& node_list) :
                        FiniteElementMapping(cell, grid)
 {
-  size_t reserve_size;
+  const std::string fname = __FUNCTION__;
+
   if (cell.SubType() == chi_mesh::CellType::SLAB)
   {
-    reserve_size = SetNumNodesAndLocalRegister(3, node_list.size());
+    SetNumNodesAndLocalRegister(3, node_list.size());
+    m_face_num_nodes.assign(cell.faces.size(), 1);
   }
   else if (cell.SubType() == chi_mesh::CellType::TRIANGLE)
   {
-    reserve_size = SetNumNodesAndLocalRegister(6, node_list.size());
+    SetNumNodesAndLocalRegister(6, node_list.size());
+    m_face_num_nodes.assign(cell.faces.size(), 3);
   }
   else if (cell.SubType() == chi_mesh::CellType::QUADRILATERAL)
   {
-    reserve_size = SetNumNodesAndLocalRegister(9, node_list.size());
+    SetNumNodesAndLocalRegister(9, node_list.size());
+    m_face_num_nodes.assign(cell.faces.size(), 3);
   }
   else if (cell.SubType() == chi_mesh::CellType::TETRAHEDRON)
   {
-    reserve_size = SetNumNodesAndLocalRegister(10, node_list.size());
+    SetNumNodesAndLocalRegister(10, node_list.size());
+    m_face_num_nodes.assign(cell.faces.size(), 6);
   }
   else if (cell.SubType() == chi_mesh::CellType::HEXAHEDRON)
   {
-    reserve_size = SetNumNodesAndLocalRegister(27, node_list.size());
+    SetNumNodesAndLocalRegister(27, node_list.size());
+    m_face_num_nodes.assign(cell.faces.size(), 9);
   }
   else
-    throw std::logic_error(std::string(__FUNCTION__) +
-                           "Unsupported cell-type encountered.");
+    throw std::logic_error(fname + "Unsupported cell-subtype encountered.");
+
+  const size_t nls_before = node_list.size();
 
   //======================================== Add the nodes to node_list
-//  node_list.reserve(reserve_size);
-  // Add cell vertices
+  //==================== Add cell vertices
   // All of the cell vertices participate in Q2 vertices
   // so we can add all them here abstractly.
   for (uint64_t cvid : m_cell.vertex_ids)
@@ -75,7 +50,7 @@ LagrangeQ2::LagrangeQ2(const chi_mesh::Cell &cell,
                            IdentifyingInfo({{cvid}}),
                            m_grid.vertices[cvid]);
 
-  // Cell-subtype specifics
+  //==================== Cell-subtype specifics
   // For a slab we only have to add the cell-centroid.
   if (m_cell.SubType() == chi_mesh::CellType::SLAB)
     node_list.emplace_back(NodeType::INTERNAL,
@@ -152,6 +127,121 @@ LagrangeQ2::LagrangeQ2(const chi_mesh::Cell &cell,
                            IdentifyingInfo({{},{m_cell.global_id}}),
                            m_cell.centroid);
   }
+
+  const size_t nls_after = node_list.size();
+
+  if ((nls_after - nls_before) != NumNodes())
+    throw std::logic_error(fname + ": Cell node accounting error.");
+
+  //=================================== Initialize face_2_cell_map
+  m_face_2_cell_map.assign(cell.faces.size(), std::vector<uint>());
+  for (size_t f=0; f<cell.faces.size(); ++f)
+    m_face_2_cell_map[f].assign(m_face_num_nodes[f], 0);
+
+  //=================================== Map face node
+  // The Slab is so simple we can just hard code
+  if (cell.SubType() == chi_mesh::CellType::SLAB)
+  {
+    m_face_2_cell_map[0][0] = 0;
+    m_face_2_cell_map[1][0] = 1;
+  }
+  // The faces of a triangle and a quadrilateral are both just
+  // edges with an additional node at the center. We can use the
+  // same logic for both of them
+  else if (cell.SubType() == chi_mesh::CellType::TRIANGLE or
+           cell.SubType() == chi_mesh::CellType::QUADRILATERAL)
+  {
+    size_t f=0;
+    for (auto& face : m_cell.faces)
+    {
+      std::vector<NodeInfo> fnod_list;
+      // Add face corners
+      for (uint64_t fvid : face.vertex_ids)
+        fnod_list.emplace_back(NodeType::CORNER,
+                               IdentifyingInfo({{fvid}}),
+                               m_grid.vertices[fvid]);
+
+      // Add face centroid
+      fnod_list.emplace_back(NodeType::FACE,
+                             IdentifyingInfo(
+                               {std::set<uint64_t>(face.vertex_ids.begin(),
+                                                   face.vertex_ids.end())}),
+                             face.centroid);
+
+      if (fnod_list.size() != m_face_num_nodes[f])
+        throw std::logic_error(fname + "Face node mapping error.");
+
+      for (size_t fn=0; fn<fnod_list.size(); ++fn)
+        for (size_t cn=0; cn<NumNodes(); ++cn)
+          if (node_list[nls_before + cn] == fnod_list[fn])
+          {
+            m_face_2_cell_map[f][fn] = cn;
+            break;
+          }
+
+      ++f;
+    }//for face
+  }
+  // The faces of a tet and a hex have their edges split.
+  // The faces of a hex have an additional node at the centroid.
+  else if (cell.SubType() == chi_mesh::CellType::TETRAHEDRON or
+           cell.SubType() == chi_mesh::CellType::HEXAHEDRON)
+  {
+    size_t f=0;
+    for (auto& face : m_cell.faces)
+    {
+      std::vector<NodeInfo> fnod_list;
+      // Add face corners
+      for (uint64_t fvid : face.vertex_ids)
+        fnod_list.emplace_back(NodeType::CORNER,
+                               IdentifyingInfo({{fvid}}),
+                               m_grid.vertices[fvid]);
+
+      // Add edge centers
+      const size_t num_face_verts = face.vertex_ids.size();
+      for (size_t fv=0; fv<num_face_verts; ++fv)
+      {
+        size_t fvp1 = (fv <(num_face_verts - 1))? fv+1 : 0;
+
+        uint64_t vid0 = face.vertex_ids[fv  ];
+        uint64_t vid1 = face.vertex_ids[fvp1];
+
+        std::pair<uint64_t, uint64_t> edge(std::min(vid0, vid1),
+                                           std::max(vid0, vid1));
+
+        const auto& v0 = m_grid.vertices[edge.first];
+        const auto& v1 = m_grid.vertices[edge.second];
+
+        auto edge_centroid = 0.5*(v0+v1);
+
+        fnod_list.emplace_back(NodeType::EDGE,
+                               IdentifyingInfo({{edge.first,edge.second}}),
+                               edge_centroid);
+      }
+
+      // Add face centroid only for hex
+      if (cell.SubType() == chi_mesh::CellType::HEXAHEDRON)
+        fnod_list.emplace_back(NodeType::FACE,
+                               IdentifyingInfo(
+                                 {std::set<uint64_t>(face.vertex_ids.begin(),
+                                                     face.vertex_ids.end())}),
+                               face.centroid);
+
+      if (fnod_list.size() != m_face_num_nodes[f])
+        throw std::logic_error(fname + "Face node mapping error.");
+
+      for (size_t fn=0; fn<fnod_list.size(); ++fn)
+        for (size_t cn=0; cn<NumNodes(); ++cn)
+          if (node_list[nls_before + cn] == fnod_list[fn])
+          {
+            m_face_2_cell_map[f][fn] = cn;
+            break;
+          }
+
+      ++f;
+    }//for face
+  }
+
 }
 
 size_t LagrangeQ2::

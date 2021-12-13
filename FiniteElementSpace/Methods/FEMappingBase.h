@@ -9,6 +9,8 @@
 
 #include "ChiMath/Quadratures/quadrature.h"
 
+#include "ChiMesh/Cell/cell.h"
+
 namespace chi_math::finite_element
 {
 
@@ -51,6 +53,14 @@ public: //Virtual functions - needing definitions
   virtual
   std::vector<chi_mesh::Vector3>
   CellNodeLocations(const chi_mesh::Cell& cell) const = 0;
+
+  typedef std::pair<chi_mesh::CellType, unsigned int/*order*/> QuadratureKey;
+  /**Adds the appropriate quadratures for volumetric and surface integrations,
+   * for the referenced cell, to the quadrature map. The required quadrature
+   * is only added to the map if not already there.*/
+  virtual void AddRequiredQuadratures(
+    std::map<QuadratureKey, Quadrature>& quadrature_stack) const
+  {/*Does nothing by default*/};
 
   /**Returns the number of nodes associated with a given cell-face pair.*/
   virtual
@@ -113,7 +123,7 @@ public: //Non-virtual functions
   const chi_mesh::Cell& ReferenceCell() const {return m_cell;}
 
 public:
-  uint64_t MapNodeRegister(size_t node_index)
+  uint64_t MapNodeRegister(size_t node_index) const
   {
     return m_local_node_register.at(node_index);
   }

@@ -33,22 +33,25 @@ namespace chi_math::finite_element
       }
     }
 
-    std::pair<bool, size_t> FindNode(const NodeInfo& node)
+    std::pair<bool, size_t> FindNode(const NodeInfo& node) const
     {
       for (uint64_t id : node.vertex_id_info)
-        for (size_t node_id : m_vertex_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
+        if (m_vertex_subscriptions.count(id) > 0)
+          for (size_t node_id : m_vertex_subscriptions.at(id))
+            if (node == m_node_list[node_id])
+              return std::make_pair(true, node_id);
 
       for (uint64_t id : node.cell_id_info)
-        for (size_t node_id : m_cell_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
+        if (m_cell_subscriptions.count(id) > 0)
+          for (size_t node_id : m_cell_subscriptions.at(id))
+            if (node == m_node_list[node_id])
+              return std::make_pair(true, node_id);
 
       for (uint64_t id : node.aux_id_info)
-        for (size_t node_id : m_aux_number_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
+        if (m_aux_number_subscriptions.count(id) > 0)
+          for (size_t node_id : m_aux_number_subscriptions.at(id))
+            if (node == m_node_list[node_id])
+              return std::make_pair(true, node_id);
 
       return std::make_pair(false,m_node_list.size());
     }
@@ -87,24 +90,28 @@ namespace chi_math::finite_element
     }
 
     std::vector<NodeInfo>& Data() {return m_node_list;}
+    const std::vector<NodeInfo>& Data() const {return m_node_list;}
 
   public:
-    std::pair<bool, size_t> FindNode(const NodeInfo& node)
+    std::pair<bool, size_t> FindNode(const NodeInfo& node) const
     {
       for (uint64_t id : node.vertex_id_info)
-        for (size_t node_id : m_vertex_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
+        if (m_vertex_subscriptions.count(id) > 0)
+          for (size_t node_id : m_vertex_subscriptions.at(id))
+            if (node == m_node_list[node_id])
+              return std::make_pair(true, node_id);
 
       for (uint64_t id : node.cell_id_info)
-        for (size_t node_id : m_cell_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
+        if (m_cell_subscriptions.count(id) > 0)
+          for (size_t node_id : m_cell_subscriptions.at(id))
+            if (node == m_node_list[node_id])
+              return std::make_pair(true, node_id);
 
       for (uint64_t id : node.aux_id_info)
-        for (size_t node_id : m_aux_number_subscriptions[id])
-          if (node == m_node_list[node_id])
-            return std::make_pair(true, node_id);
+        if (m_aux_number_subscriptions.count(id) > 0)
+          for (size_t node_id : m_aux_number_subscriptions.at(id))
+            if (node == m_node_list[node_id])
+              return std::make_pair(true, node_id);
 
       return std::make_pair(false,m_node_list.size());
     }
