@@ -17,6 +17,24 @@ const FiniteElementMapping& SpatialDiscretization::
     return *m_ghost_cell_mappings.at(cell.global_id);
 }
 
+const std::vector<int64_t>& SpatialDiscretization::
+  GetCellRelevantLocalIDRegister(const chi_mesh::Cell &cell) const
+{
+  if (cell.partition_id == chi_mpi.location_id)
+    return m_LNR_local_ids;
+  else
+    return m_GNR_local_ids;
+}
+
+const std::vector<int64_t>& SpatialDiscretization::
+  GetCellRelevantGlobalIDRegister(const chi_mesh::Cell &cell) const
+{
+  if (cell.partition_id == chi_mpi.location_id)
+    return m_LNR_global_ids;
+  else
+    return m_GNR_global_ids;
+}
+
 /**Gets the volume of the requested cell.*/
 double SpatialDiscretization::GetCellVolume(const chi_mesh::Cell& cell)
 {
@@ -49,7 +67,30 @@ size_t SpatialDiscretization::GetFaceNumNodes(const chi_mesh::Cell& cell, size_t
 std::vector<chi_mesh::Vector3> SpatialDiscretization::
   GetCellNodeLocations(const chi_mesh::Cell& cell)
 {
-  return m_local_cell_mappings[cell.local_id]->CellNodeLocations(cell);
+  const auto& cell_mapping = GetCellMapping(cell);
+
+  const size_t num_nodes = cell_mapping.NumNodes();
+
+  std::vector<chi_mesh::Vector3> node_locations(num_nodes);
+
+  if (cell.partition_id == chi_mpi.location_id)
+    for (size_t n=0; n<num_nodes; ++n)
+    {
+      const size_t register_id = cell_mapping.MapNodeRegister(n);
+      const size_t register_id_map = m_LNR_id_2_LNLL_id_map[register_id];
+
+      node_locations[n] = m_LNLL[register_id_map];
+    }
+  else
+    for (size_t n=0; n<num_nodes; ++n)
+    {
+      const size_t register_id = cell_mapping.MapNodeRegister(n);
+      const size_t register_id_map = m_GNR_id_2_GNLL_id_map[register_id];
+
+      node_locations[n] = m_GNLL[register_id_map];
+    }
+
+  return node_locations;
 }
 
 //###################################################################

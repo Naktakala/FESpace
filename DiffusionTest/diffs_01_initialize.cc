@@ -111,6 +111,10 @@ void DiffusionSolver::Initialize()
   MatInfo info;
   MatGetInfo(A,MAT_GLOBAL_SUM,&info);
 
+  MPI_Barrier(MPI_COMM_WORLD);
+  chi_log.Log(LOG_ALL) << "Num local dofs: " << num_local_dofs;
+  MPI_Barrier(MPI_COMM_WORLD);
+
   chi_log.Log(LOG_0) << "Number of mallocs used = " << info.mallocs
                        << "\nNumber of non-zeros allocated = "
                        << info.nz_allocated

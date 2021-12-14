@@ -40,7 +40,8 @@ namespace chi_math::finite_element
     std::vector<int64_t>             m_GNR_local_ids;
     std::vector<int64_t>             m_GNR_global_ids;
 
-    std::vector<int64_t>             m_ghost_global_ids;
+    std::vector<int64_t>             m_local_nodes_global_ids;
+    std::vector<int64_t>             m_ghost_nodes_global_ids;
 
     int64_t                          m_num_local_nodes = 0;
     int64_t                          m_num_global_nodes = 0;
@@ -54,6 +55,12 @@ namespace chi_math::finite_element
       m_grid(in_grid) {}
 
     const FiniteElementMapping& GetCellMapping(const chi_mesh::Cell& cell) const;
+
+    const std::vector<int64_t>&
+      GetCellRelevantLocalIDRegister(const chi_mesh::Cell& cell) const;
+
+      const std::vector<int64_t>&
+      GetCellRelevantGlobalIDRegister(const chi_mesh::Cell& cell) const;
 
   public:
     /**Returns the text name associated with this space.*/
@@ -122,7 +129,7 @@ namespace chi_math::finite_element
 
     //03
     std::pair<std::vector<int64_t>, std::vector<int64_t>>
-      BuildNodalContinuousFESparsityPattern() const;
+      BuildNodalCFEMSparsityPattern() const;
 
     std::pair<std::vector<int64_t>, std::vector<int64_t>>
       BuildCFEMSparsityPattern(
@@ -139,14 +146,17 @@ namespace chi_math::finite_element
 //      BuildNodalFVSparsityPattern() const;
 
     //04
-    int64_t NumLocalNodes() const {return m_num_local_nodes;}
-    int64_t NumGlobalNodes() const {return m_num_global_nodes;}
+    int64_t NumLocalNodes() const;
+    int64_t NumGlobalNodes() const;
+
+    int64_t NumLocalDOFs(const chi_math::UnknownManager& unknown_manager) const;
+    int64_t NumGlobalDOFs(const chi_math::UnknownManager& unknown_manager) const;
 
     int64_t MapNodeLocal(const chi_mesh::Cell& cell, size_t node_index) const;
     int64_t MapNodeGlobal(const chi_mesh::Cell& cell, size_t node_index) const;
 
-    int64_t NumLocalDOFs(const chi_math::UnknownManager& unknown_manager) const;
-    int64_t NumGlobalDOFs(const chi_math::UnknownManager& unknown_manager) const;
+    std::vector<int64_t> MapNodesLocal(const chi_mesh::Cell& cell) const;
+    std::vector<int64_t> MapNodesGlobal(const chi_mesh::Cell& cell) const;
 
     int64_t MapDOFLocal(const chi_mesh::Cell& cell,
                         size_t node_index,
@@ -172,7 +182,7 @@ namespace chi_math::finite_element
                     unsigned int component) const;
 
     std::vector<int64_t>
-      GetGhostNodesGlobalIDs() const {return m_ghost_global_ids;}
+      GetGhostNodesGlobalIDs() const {return m_ghost_nodes_global_ids;}
 
     std::vector<int64_t>
       GetGhostDOFsGlobalIDs(
@@ -203,6 +213,7 @@ namespace chi_math::finite_element
         m_local_cell_mappings.push_back(
           std::make_unique<ArbMapping>(cell, *m_grid, local_node_register));
 
+      std::vector<NodeInfo> ghost_node_list;
       std::vector<std::pair<NodeInfo,uint64_t>> ghost_node_register;
       {
         const std::vector<uint64_t> ghost_cell_global_ids =
@@ -211,11 +222,15 @@ namespace chi_math::finite_element
         for (uint64_t ghost_global_id : ghost_cell_global_ids)
         {
           const auto& cell = m_grid->cells[ghost_global_id];
-          std::vector<NodeInfo> ghost_node_list;
+
+          const size_t first_node_location = ghost_node_list.size();
           m_ghost_cell_mappings[ghost_global_id] =
             std::make_unique<ArbMapping>(cell, *m_grid,ghost_node_list);
-          for (auto& node : ghost_node_list)
-            ghost_node_register.emplace_back(node, cell.partition_id);
+          const size_t last_node_location = ghost_node_list.size()-1;
+
+          for (size_t n=first_node_location; n<=last_node_location; ++n)
+            ghost_node_register.emplace_back(ghost_node_list[n],
+                                             cell.partition_id);
         }
       }
 

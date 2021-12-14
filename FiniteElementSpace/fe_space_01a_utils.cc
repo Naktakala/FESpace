@@ -259,7 +259,7 @@ std::vector<int64_t> SpatialDiscretization::
   //============================================= Compute number of global nodes
   num_global_nodes = 0;
   for (uint64_t pid=0; pid<static_cast<uint64_t>(chi_mpi.process_count); ++pid)
-    num_global_nodes += locI_num_TLN[pid];
+    num_global_nodes += static_cast<int64_t>(locI_num_TLN[pid]);
 
   return TLN_id_to_global_id_map;
 }

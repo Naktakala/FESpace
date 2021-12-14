@@ -130,6 +130,8 @@ void chi_math::finite_element::SpatialDiscretization::
   chi_log.Log(LOG_0) << "Spatial Discretization: Assembling nodes";
   MPI_Barrier(MPI_COMM_WORLD);
 
+  NodeListFindManager LNR_finder(LNR);
+
   //============================================= Filter the local node register
   NodeInfoListManager FLNR_manager;
   {
@@ -235,6 +237,8 @@ void chi_math::finite_element::SpatialDiscretization::
   m_num_local_nodes = static_cast<int64_t>(TLNR.size());
   m_num_global_nodes = num_global_nodes;
 
+  m_local_nodes_global_ids = TLNR_id_to_global_id_map;
+
   //============================================= Intersect FLNR and FGNR
   VecNodeInfoIDPair IGNR = IntersectGNRWithLNR(FLNR_manager, FGNR);
 
@@ -332,8 +336,6 @@ void chi_math::finite_element::SpatialDiscretization::
   // search both these list to find the mapping
   std::map<uint64_t, std::vector<int64_t>> FQNR_mapped;
   {
-    NodeListFindManager LNR_finder(LNR);
-
     for (const auto& [fqnr_pid, fqnr_node_list] : FQNR)
     {
       auto& fqnr_map_list = FQNR_mapped[fqnr_pid];
@@ -341,9 +343,7 @@ void chi_math::finite_element::SpatialDiscretization::
 
       for (const auto& fqnr_node : fqnr_node_list)
       {
-        auto location_info = LNR_finder.FindNode(fqnr_node);
-        const bool has_node   = location_info.first;
-        const size_t LNR_id = location_info.second;
+        const auto [has_node, LNR_id] = LNR_finder.FindNode(fqnr_node);
 
         if (has_node)
           fqnr_map_list.push_back(m_LNR_global_ids[LNR_id]);
@@ -360,31 +360,46 @@ void chi_math::finite_element::SpatialDiscretization::
   std::map<uint64_t, std::vector<int64_t>> consolidated_FGNR_mapping =
     ChiMPI2::MapAllToAll(FQNR_mapped, MPI_LONG_LONG_INT);
 
+  //============================================= Make local mappings for GNR
+  m_GNR_local_ids.assign(GNR.size(), -1);
+  {
+    size_t gnr_id = 0;
+    for (const auto& gnr_node_pid_pair : GNR)
+    {
+      const auto& gnr_node = gnr_node_pid_pair.first;
+
+      const auto [list_has_node, location] = LNR_finder.FindNode(gnr_node);
+
+      if (list_has_node)
+        m_GNR_local_ids[gnr_id] = m_LNR_local_ids[location];
+
+      ++gnr_id;
+    }
+  }
+
   //============================================= Make global mappings for GNR
   {
     m_GNR_global_ids.assign(GNR.size(), -1);
 
-    uint64_t node_register_id = 0;
+    uint64_t gnr_id = 0;
     for (const auto& node_info_id_pair : GNR)
     {
       const auto& node = node_info_id_pair.first;
 
       //=============================== Search consolidated Ghost Node Register
-      for (const auto& pid_node_list : consolidated_FGNR)
+      for (const auto& [pid, node_list] : consolidated_FGNR)
       {
-        const uint64_t    pid = pid_node_list.first;
-        const auto& node_list = pid_node_list.second;
         const auto& node_map  = consolidated_FGNR_mapping.at(pid);
 
         for (size_t n=0; n<node_list.size(); ++n)
           if (node_list[n] == node)
           {
-            m_GNR_global_ids[node_register_id] = node_map[n];
+            m_GNR_global_ids[gnr_id] = node_map[n];
             goto next_ghost_node;
           }
       }//for each ghost list
 
-      next_ghost_node: ++node_register_id;
+      next_ghost_node: ++gnr_id;
     }//for node-id pair in GNR
   }
 
@@ -392,7 +407,7 @@ void chi_math::finite_element::SpatialDiscretization::
   //                                              collect ghost global-ids
   VecNodeInfoIDPair TGNR = SubtractLNRFromGNR(TLNR_finder, GNR);
 
-  m_ghost_global_ids.reserve(TGNR.size());
+  m_ghost_nodes_global_ids.reserve(TGNR.size());
   for (const auto& tgnr_node_pid_pair : TGNR)
   {
     const auto& tgnr_node = tgnr_node_pid_pair.first;
@@ -415,7 +430,7 @@ void chi_math::finite_element::SpatialDiscretization::
     if (tgnr_node_global_id < 0)
       throw std::logic_error(fname + ": Error creating m_ghost_global_ids.");
 
-    m_ghost_global_ids.push_back(tgnr_node_global_id);
+    m_ghost_nodes_global_ids.push_back(tgnr_node_global_id);
   }
 
   //============================================= Check global-id map

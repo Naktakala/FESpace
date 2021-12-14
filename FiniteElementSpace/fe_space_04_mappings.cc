@@ -5,45 +5,8 @@ extern ChiMPI& chi_mpi;
 
 using namespace chi_math::finite_element;
 
-//###################################################################
-int64_t SpatialDiscretization::
-  MapNodeLocal(const chi_mesh::Cell &cell, size_t node_index) const
-{
-  const std::string fname = __FUNCTION__;
-
-  if (cell.partition_id != chi_mpi.location_id/*home*/)
-    throw std::invalid_argument(fname + ": Function cannot be used on "
-                                        "non-local cells.");
-
-  const auto& cell_mapping = *m_local_cell_mappings[cell.local_id];
-
-  uint64_t register_index = cell_mapping.MapNodeRegister(node_index);
-
-  return m_LNR_local_ids.at(register_index);
-}
-
-//###################################################################
-int64_t SpatialDiscretization::
-  MapNodeGlobal(const chi_mesh::Cell &cell, size_t node_index) const
-{
-  const std::string fname = __FUNCTION__;
-
-  const auto& cell_mapping = GetCellMapping(cell);
-
-  const uint64_t register_index = cell_mapping.MapNodeRegister(node_index);
-
-  if (cell.partition_id == chi_mpi.location_id/*home*/)
-    return m_LNR_global_ids.at(register_index);
-  else
-  {
-    try { return m_GNR_global_ids.at(register_index); }
-    catch (const std::out_of_range& oor)
-    {
-      throw std::out_of_range(fname + ": Ghost cell mapping not found for "
-                                      "given cell.");
-    }
-  }
-}
+int64_t SpatialDiscretization::NumLocalNodes() const {return m_num_local_nodes;}
+int64_t SpatialDiscretization::NumGlobalNodes() const {return m_num_global_nodes;}
 
 //###################################################################
 int64_t SpatialDiscretization::
@@ -65,6 +28,76 @@ int64_t SpatialDiscretization::
 
 //###################################################################
 int64_t SpatialDiscretization::
+  MapNodeLocal(const chi_mesh::Cell &cell, size_t node_index) const
+{
+  const FiniteElementMapping& cell_mapping = GetCellMapping(cell);
+
+  const uint64_t register_index = cell_mapping.MapNodeRegister(node_index);
+
+  const auto& local_id_register = GetCellRelevantLocalIDRegister(cell); //VecInt64
+
+  return local_id_register[register_index];
+}
+
+//###################################################################
+/***/
+std::vector<int64_t> SpatialDiscretization::
+  MapNodesLocal(const chi_mesh::Cell &cell) const
+{
+  const auto& cell_mapping = GetCellMapping(cell);
+  const size_t num_nodes = cell_mapping.NumNodes();
+
+  const auto& local_id_register = GetCellRelevantLocalIDRegister(cell); //VecInt64
+
+  std::vector<int64_t> local_ids(num_nodes, -1);
+
+  for (size_t n=0; n<num_nodes; ++n)
+  {
+    const size_t register_index = cell_mapping.MapNodeRegister(n);
+    local_ids[n] = local_id_register[register_index];
+  }
+
+  return local_ids;
+}
+
+//###################################################################
+int64_t SpatialDiscretization::
+  MapNodeGlobal(const chi_mesh::Cell &cell, size_t node_index) const
+{
+  const auto& cell_mapping = GetCellMapping(cell);
+
+  const uint64_t register_index = cell_mapping.MapNodeRegister(node_index);
+
+  const auto& global_id_register = GetCellRelevantGlobalIDRegister(cell); //VecInt64
+
+  return global_id_register[register_index];
+}
+
+//###################################################################
+/***/
+std::vector<int64_t> SpatialDiscretization::
+  MapNodesGlobal(const chi_mesh::Cell &cell) const
+{
+  const auto& cell_mapping = GetCellMapping(cell);
+  const size_t num_nodes = cell_mapping.NumNodes();
+
+  const auto& global_id_register = GetCellRelevantGlobalIDRegister(cell); //VecInt64
+
+  std::vector<int64_t> global_ids(num_nodes, -1);
+
+  for (size_t n=0; n<num_nodes; ++n)
+  {
+    const size_t register_index = cell_mapping.MapNodeRegister(n);
+    global_ids[n] = global_id_register[register_index];
+  }
+
+  return global_ids;
+}
+
+
+
+//###################################################################
+int64_t SpatialDiscretization::
   MapDOFLocal(const chi_mesh::Cell &cell, size_t node_index,
               const chi_math::UnknownManager &unknown_manager,
               const unsigned int unknown_id,
@@ -72,14 +105,12 @@ int64_t SpatialDiscretization::
 {
   const std::string fname = __FUNCTION__;
 
-  if (cell.partition_id != chi_mpi.location_id/*home*/)
-    throw std::invalid_argument(fname + ": Function cannot be used on "
-                                        "non-local cells.");
-
   const auto& cell_mapping = GetCellMapping(cell);
   const uint64_t register_index = cell_mapping.MapNodeRegister(node_index);
 
-  const int64_t node_address = m_LNR_local_ids[register_index];
+  const auto& local_id_register = GetCellRelevantLocalIDRegister(cell); //VecInt64
+
+  const int64_t node_address = local_id_register[register_index];
 
   const auto& uk_man   = unknown_manager;
   const auto storage_type = unknown_manager.dof_storage_type;
@@ -110,13 +141,11 @@ int64_t SpatialDiscretization::
   const auto& cell_mapping = GetCellMapping(cell);
   const uint64_t register_index = cell_mapping.MapNodeRegister(node_index);
 
-  int64_t temp_node_address = 0;
+  int64_t node_address = 0;
   if (cell.partition_id == chi_mpi.location_id)
-    temp_node_address = m_LNR_global_ids[register_index];
+    node_address = m_LNR_global_ids[register_index];
   else
-    temp_node_address = m_GNR_global_ids[register_index];
-
-  const int64_t node_address = temp_node_address;
+    node_address = m_GNR_global_ids[register_index];
 
   const auto& uk_man   = unknown_manager;
   const auto storage_type = unknown_manager.dof_storage_type;
@@ -234,7 +263,7 @@ std::vector<int64_t> SpatialDiscretization::
 {
   const auto storage_type = unknown_manager.dof_storage_type;
   const size_t num_nodal_dofs_ = unknown_manager.GetTotalUnknownStructureSize();
-  const size_t num_ghost_nodes = m_ghost_global_ids.size();
+  const size_t num_ghost_nodes = m_ghost_nodes_global_ids.size();
   const size_t num_ghost_dofs = num_ghost_nodes * num_nodal_dofs_;
 
   const int64_t num_nodal_dofs = static_cast<int64_t>(num_nodal_dofs_);
@@ -246,7 +275,7 @@ std::vector<int64_t> SpatialDiscretization::
     size_t dof_id = 0;
     for (size_t g=0; g<num_ghost_nodes; ++g)
     {
-      const int64_t node_global_address = m_ghost_global_ids[g];
+      const int64_t node_global_address = m_ghost_nodes_global_ids[g];
       for (int64_t nodal_dof_id=0; nodal_dof_id<num_nodal_dofs; ++nodal_dof_id)
       {
         ghost_dofs_global_ids[dof_id] =
@@ -260,7 +289,7 @@ std::vector<int64_t> SpatialDiscretization::
     size_t dof_id = 0;
     for (size_t g=0; g<num_ghost_nodes; ++g)
     {
-      const int64_t node_global_address = m_ghost_global_ids[g];
+      const int64_t node_global_address = m_ghost_nodes_global_ids[g];
       for (int64_t nodal_dof_id=0; nodal_dof_id<num_nodal_dofs; ++nodal_dof_id)
       {
         ghost_dofs_global_ids[dof_id] =

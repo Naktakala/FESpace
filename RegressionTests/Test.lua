@@ -21,6 +21,8 @@ chiVolumeMesherExecute();
 
 chiDestroyUnpartitionedMesh(umesh)
 
+chiRegionExportMeshToVTK(region1, "ZMesh")
+
 --############################################### Set Material IDs
 vol0 = chiLogicalVolumeCreate(RPP,-1000,1000,-1000,1000,-1000,1000)
 chiVolumeMesherSetProperty(MATID_FROMLOGICAL,vol0,0)

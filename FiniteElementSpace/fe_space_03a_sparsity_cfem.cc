@@ -8,7 +8,7 @@ using namespace chi_math::finite_element;
 //###################################################################
 /***/
 std::pair<std::vector<int64_t>, std::vector<int64_t>> SpatialDiscretization::
-  BuildNodalContinuousFESparsityPattern() const
+  BuildNodalCFEMSparsityPattern() const
 {
   const int64_t num_local_nodes = NumLocalNodes();
 
@@ -18,58 +18,41 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> SpatialDiscretization::
   VecSetInt64 native_connectivity(num_local_nodes);
   VecSetInt64 foreign_connectivity(num_local_nodes);
 
+  /**Lambda for inserting a cell's connectivity into the
+   * master connectivity sets*/
+  auto InsertCellConnectivity = [this,
+                                 &native_connectivity,
+                                 &foreign_connectivity]
+                                 (const chi_mesh::Cell& cell)
+  {
+    const auto cell_node_indices = CellNodeIndices(cell);
+
+    for (const auto i : cell_node_indices)
+    {
+      const int64_t node_i_local_addr = MapNodeLocal(cell, i);
+
+      if (node_i_local_addr >= 0) //i is in diagonal-block
+      {
+        for (const auto j : cell_node_indices)
+        {
+          const int64_t node_j_local_addr = MapNodeLocal(cell, j);
+          const int64_t node_j_globl_addr = MapNodeGlobal(cell, j);
+
+          if (node_j_local_addr >= 0) //j is in diagonal-block
+            native_connectivity[node_i_local_addr].insert(node_j_globl_addr);
+          else
+            foreign_connectivity[node_i_local_addr].insert(node_j_globl_addr);
+
+        }//for j
+      }//if local row
+    }//for i
+  };
+
   for (const auto& cell : m_grid->local_cells)
-  {
-    const auto cell_node_indices = CellNodeIndices(cell);
+    InsertCellConnectivity(cell);
 
-    for (const auto i : cell_node_indices)
-    {
-      const int64_t i_map = MapNodeLocal(cell, i);
-
-      if (i_map >= 0) //i is in diagonal-block
-      {
-        for (const auto j : cell_node_indices)
-        {
-          const int64_t j_map_local = MapNodeLocal(cell, j);
-          const int64_t j_map_globl = MapNodeGlobal(cell, j);
-
-          if (j_map_local >= 0) //j is in diagonal-block
-            native_connectivity[i_map].insert(j_map_globl);
-          else
-            foreign_connectivity[i_map].insert(j_map_globl);
-
-        }
-      }//if local row
-    }//for i
-  }//for cell
-
-  const auto ghost_cell_indices = m_grid->cells.GetGhostGlobalIDs();
-  for (const uint64_t ghost_global_id : ghost_cell_indices)
-  {
-    const auto& cell = m_grid->cells[ghost_global_id];
-
-    const auto cell_node_indices = CellNodeIndices(cell);
-
-    for (const auto i : cell_node_indices)
-    {
-      const int64_t i_map = MapNodeLocal(cell, i);
-
-      if (i_map >= 0) //i is in diagonal-block
-      {
-        for (const auto j : cell_node_indices)
-        {
-          const int64_t j_map_local = MapNodeLocal(cell, j);
-          const int64_t j_map_globl = MapNodeGlobal(cell, j);
-
-          if (j_map_local >= 0) //j is in diagonal-block
-            native_connectivity[i_map].insert(j_map_globl);
-          else
-            foreign_connectivity[i_map].insert(j_map_globl);
-
-        }
-      }//if local row
-    }//for i
-  }
+  for (const uint64_t ghost_global_id : m_grid->cells.GetGhostGlobalIDs())
+    InsertCellConnectivity(m_grid->cells[ghost_global_id]);
 
   std::vector<int64_t> nnz_in_diagonal(num_local_nodes, 0);
   std::vector<int64_t> nnz_off_diagonal(num_local_nodes, 0);
@@ -88,18 +71,15 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> SpatialDiscretization::
 //###################################################################
 /***/
 std::pair<std::vector<int64_t>, std::vector<int64_t>> SpatialDiscretization::
-  BuildCFEMSparsityPattern(
-    const chi_math::UnknownManager& unknown_manager) const
+  BuildCFEMSparsityPattern(const chi_math::UnknownManager& unknown_manager) const
 {
   const auto storage_type = unknown_manager.dof_storage_type;
-  const auto nodal_sparsity_pattern = BuildNodalContinuousFESparsityPattern();
+  const auto [nodal_nnz_in_diag, nodal_nnz_off_diag] =
+  BuildNodalCFEMSparsityPattern();
 
-  const auto& nodal_nnz_in_diag = nodal_sparsity_pattern.first;
-  const auto& nodal_nnz_off_diag = nodal_sparsity_pattern.second;
-
-  const size_t num_nodal_dofs = unknown_manager.GetTotalUnknownStructureSize();
-  const size_t num_local_nodes = nodal_nnz_in_diag.size();
-  const int64_t num_local_dofs = NumLocalDOFs(unknown_manager);
+  const size_t  num_local_nodes = nodal_nnz_in_diag.size();
+  const size_t  num_nodal_dofs  = unknown_manager.GetTotalUnknownStructureSize();
+  const int64_t num_local_dofs  = this->NumLocalDOFs(unknown_manager);
 
   std::vector<int64_t> nnz_in_diagonal(num_local_dofs, 0);
   std::vector<int64_t> nnz_off_diagonal(num_local_dofs, 0);
