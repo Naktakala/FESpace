@@ -16,17 +16,15 @@ namespace chi_math::finite_element
                  std::vector<NodeInfo>& node_list);
 
   public:
-    std::vector<chi_mesh::Vector3>
-    CellNodeLocations(const chi_mesh::Cell& cell) const override;
 
-    size_t FaceNumNodes(const chi_mesh::Cell& cell, size_t f) const override;
+    size_t FaceNumNodes(size_t face_index) const override;
 
-    size_t MapFaceNodeToCellNode(const chi_mesh::Cell& cell, size_t face_index,
+    size_t MapFaceNodeToCellNode(size_t face_index,
                                  size_t face_node_index) const override;
 
     VolumeQPData BuildVolumetricQPData(
-      const chi_mesh::Cell& cell,
-      chi_math::QuadratureOrder order) const override
+      chi_math::QuadratureOrder order,
+      std::map<QuadratureKey, QuadraturePtr>& quadrature_stack) const override
     {
       return VolumeQPData({}, {}, {}, {}, {});
     }

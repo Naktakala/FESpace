@@ -5,7 +5,7 @@
 #include "chi_log.h"
 extern ChiLog& chi_log;
 
-#include "ChiMPI/chi_mpi_map_all2all.h"
+#include "ChiMPI/chi_mpi_utils.h"
 
 //###################################################################
 /**Assembles the nodes for this discretization.
@@ -281,7 +281,7 @@ void chi_math::finite_element::SpatialDiscretization::
   // have to send all this information back to the
   // query-partitions.
   std::map<uint64_t, std::vector<int64_t>> consolidated_IGNR_mapping =
-    ChiMPI2::MapAllToAll(IQNR_mapped, MPI_LONG_LONG_INT);
+    chi_mpi_utils::MapAllToAll(IQNR_mapped, MPI_LONG_LONG_INT);
 
   //============================================= Make global mappings for LNR
   {
@@ -358,7 +358,7 @@ void chi_math::finite_element::SpatialDiscretization::
   // have to send all this information back to the
   // query-partitions.
   std::map<uint64_t, std::vector<int64_t>> consolidated_FGNR_mapping =
-    ChiMPI2::MapAllToAll(FQNR_mapped, MPI_LONG_LONG_INT);
+    chi_mpi_utils::MapAllToAll(FQNR_mapped, MPI_LONG_LONG_INT);
 
   //============================================= Make local mappings for GNR
   m_GNR_local_ids.assign(GNR.size(), -1);

@@ -38,28 +38,30 @@ const std::vector<int64_t>& SpatialDiscretization::
 /**Gets the volume of the requested cell.*/
 double SpatialDiscretization::GetCellVolume(const chi_mesh::Cell& cell)
 {
-  return m_local_cell_mappings[cell.local_id]->Volume();
+  const auto& cell_mapping = GetCellMapping(cell);
+  return cell_mapping.Volume();
 }
 
 
 double SpatialDiscretization::GetCellFaceArea(const chi_mesh::Cell& cell,
                                               size_t face_index)
 {
-  return m_local_cell_mappings[cell.local_id]->FaceArea(face_index);
+  const auto& cell_mapping = GetCellMapping(cell);
+  return cell_mapping.FaceArea(face_index);
 }
 
 /**Gets the number of nodes (not DOFs) for the requested cell.*/
 size_t SpatialDiscretization::GetCellNumNodes(const chi_mesh::Cell& cell)
 {
-  size_t num_nodes = 0;
-
-  return m_local_cell_mappings[cell.local_id]->NumNodes();
+  const auto& cell_mapping = GetCellMapping(cell);
+  return cell_mapping.NumNodes();
 }
 
 /**Gets the number of nodes (not DOFs) for the requested cell-face pair.*/
 size_t SpatialDiscretization::GetFaceNumNodes(const chi_mesh::Cell& cell, size_t face)
 {
-  return m_local_cell_mappings[cell.local_id]->FaceNumNodes(cell, face);
+  const auto& cell_mapping = GetCellMapping(cell);
+  return cell_mapping.FaceNumNodes(face);
 }
 
 /**Returns the locations of all the nodes of the cell consistent with the

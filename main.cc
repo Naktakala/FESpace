@@ -7,11 +7,10 @@
 
 int main(int argc, char* argv[])
 {
-  ChiLog&     log     = ChiLog::GetInstance();
-
-  log.Log(LOG_0) << "FESpaceTest - Test run started";
-
   ChiTech::Initialize(argc,argv);
+
+  ChiLog& log = ChiLog::GetInstance();
+  log.Log(LOG_0) << "FESpaceTest - Test run started";
 
   auto& lua_console = ChiConsole::GetInstance();
 

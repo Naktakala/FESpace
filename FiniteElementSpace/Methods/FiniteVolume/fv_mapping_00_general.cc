@@ -28,20 +28,13 @@ FiniteVolume::
   m_face_areas = std::move(cell_info.face_areas);
 }
 
-size_t FiniteVolume::FaceNumNodes(const chi_mesh::Cell& cell, const size_t f) const
+size_t FiniteVolume::FaceNumNodes(const size_t face_index) const
 {
   return 0;
 }
 
-std::vector<chi_mesh::Vector3> FiniteVolume::
-  CellNodeLocations(const chi_mesh::Cell& cell) const
-{
-  return {cell.centroid};
-}
-
-size_t FiniteVolume::MapFaceNodeToCellNode(const chi_mesh::Cell& cell,
-                                           size_t face_index,
-                                           size_t face_node_index) const
+size_t FiniteVolume::MapFaceNodeToCellNode(const size_t face_index,
+                                           const size_t face_node_index) const
 {
   return 0;
 }

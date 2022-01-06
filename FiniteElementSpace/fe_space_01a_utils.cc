@@ -2,7 +2,7 @@
 
 #include "chi_mpi.h"
 
-#include "ChiMPI/chi_mpi_map_all2all.h"
+#include "ChiMPI/chi_mpi_utils.h"
 
 using namespace chi_math::finite_element;
 
@@ -183,7 +183,7 @@ LocINodeInfoMap SpatialDiscretization::
   // All processes participate and will populate
   // a Query Node Register (QNR).
   std::map<uint64_t, std::vector<std::byte>> QNR_serialized =
-    ChiMPI2::MapAllToAll(consolidated_GNR_serialized, MPI_BYTE);
+    chi_mpi_utils::MapAllToAll(consolidated_GNR_serialized, MPI_BYTE);
 
   //============================================= Convert/DeSerialize query data
   //                                              to usable data

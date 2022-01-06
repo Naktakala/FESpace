@@ -46,8 +46,9 @@ namespace chi_math::finite_element
     int64_t                          m_num_local_nodes = 0;
     int64_t                          m_num_global_nodes = 0;
 
-    typedef std::pair<chi_mesh::CellType, unsigned int/*order*/> QuadratureKey;
-    std::map<QuadratureKey, Quadrature> m_quadrature_stack;
+    typedef std::pair<chi_mesh::CellType, QuadratureOrder> QuadratureKey;
+    typedef std::unique_ptr<Quadrature> QuadraturePtr;
+    std::map<QuadratureKey, QuadraturePtr> m_quadrature_stack;
 
   protected:
     explicit
@@ -207,12 +208,14 @@ namespace chi_math::finite_element
     FiniteElementSpace(chi_mesh::MeshContinuumPtr& in_grid) :
       SpatialDiscretization(in_grid)
     {
+      //=============================== Make mappings for local cells
       std::vector<NodeInfo> local_node_register;
       m_local_cell_mappings.reserve(m_grid->local_cells.size());
       for (const auto& cell : m_grid->local_cells)
         m_local_cell_mappings.push_back(
           std::make_unique<ArbMapping>(cell, *m_grid, local_node_register));
 
+      //=============================== Make mappings for ghost cells
       std::vector<NodeInfo> ghost_node_list;
       std::vector<std::pair<NodeInfo,uint64_t>> ghost_node_register;
       {
@@ -234,7 +237,19 @@ namespace chi_math::finite_element
         }
       }
 
+      //=============================== Assemble nodes
       AssembleNodes(local_node_register, ghost_node_register);
+
+      //=============================== Populate quadratures
+      for (const auto& cell_mapping : m_local_cell_mappings)
+        cell_mapping->AddRequiredQuadratures(
+          cell_mapping->GetMinimumQuadratureOrder(),
+          m_quadrature_stack);
+
+      for (const auto& [cell_globl_id, cell_mapping] : m_ghost_cell_mappings)
+        cell_mapping->AddRequiredQuadratures(
+          cell_mapping->GetMinimumQuadratureOrder(),
+          m_quadrature_stack);
     }
 
     static SpatialDiscretizationPtr New(chi_mesh::MeshContinuumPtr& in_grid)

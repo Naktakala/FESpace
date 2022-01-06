@@ -6,8 +6,7 @@
 using namespace chi_math::finite_element;
 
 VolumeQPData PiecewiseLinear::
-  BuildVolumetricQPDataPolyhedron(const chi_mesh::Cell &cell,
-                            chi_math::QuadratureOrder order) const
+  BuildVolumetricQPDataPolyhedron(chi_math::QuadratureOrder order) const
 {
   std::vector<unsigned int>     quadrature_point_indices; ///< qp index only
   VecVec3                       qpoints_xyz             ; ///< qp index only
@@ -20,28 +19,28 @@ VolumeQPData PiecewiseLinear::
 
   //=================================== Determine number of internal qpoints
   size_t num_tets=0;
-  for (auto& face : cell.faces)
+  for (auto& face : m_cell.faces)
     for (auto& side : face.vertex_ids)
       ++num_tets;
 
   size_t num_vol_qpoints = qdata.qpoints.size();
   size_t ttl_num_vol_qpoints = num_tets * num_vol_qpoints;
-  size_t num_nodes = cell.vertex_ids.size();
-  size_t num_faces = cell.faces.size();
+  size_t num_nodes = m_cell.vertex_ids.size();
+  size_t num_faces = m_cell.faces.size();
 
   //=================================== Determine alpha and betaa
-  double alpha = 1.0/static_cast<double>(cell.vertex_ids.size());
+  double alpha = 1.0/static_cast<double>(m_cell.vertex_ids.size());
   std::vector<double> beta;
   beta.reserve(num_faces);
-  for (auto& face : cell.faces)
+  for (auto& face : m_cell.faces)
     beta.push_back(1.0/static_cast<double>(face.vertex_ids.size()));
 
   //=================================== Determine node to face influence map
   std::vector<VecInt> ifmap(num_nodes, VecInt(num_faces, -1));
   for (size_t i=0; i<num_nodes; ++i)
     for (size_t f=0; f<num_faces; ++f)
-      for (uint64_t fvid : cell.faces[f].vertex_ids)
-        if (cell.vertex_ids[i] == fvid)
+      for (uint64_t fvid : m_cell.faces[f].vertex_ids)
+        if (m_cell.vertex_ids[i] == fvid)
           ifmap[i][f] = 2;
 
   //=================================== Determine tetrahedron data
@@ -56,7 +55,7 @@ VolumeQPData PiecewiseLinear::
   };
   std::vector<std::vector<TetrahedronData>> tet_face_side_data;
 
-  for (auto& face : cell.faces)
+  for (auto& face : m_cell.faces)
   {
     const size_t num_tris = face.vertex_ids.size();
     std::vector<TetrahedronData> tet_side_data;
@@ -67,7 +66,7 @@ VolumeQPData PiecewiseLinear::
       const auto& v0 = m_grid.vertices[face.vertex_ids[  s]];
       const auto& v1 = m_grid.vertices[face.vertex_ids[sp1]];
       const auto& v2 = face.centroid;
-      const auto& v3 = cell.centroid;
+      const auto& v3 = m_cell.centroid;
 
       const auto v01 = v1-v0;
       const auto v02 = v2-v0;
@@ -114,7 +113,7 @@ VolumeQPData PiecewiseLinear::
 
     for (size_t f=0; f < num_faces; f++)
     {
-      auto& face = cell.faces[f];
+      auto& face = m_cell.faces[f];
       const size_t num_sides = face.vertex_ids.size();
       const double beta_f = beta[f];
       for (size_t s=0; s < num_sides; s++)

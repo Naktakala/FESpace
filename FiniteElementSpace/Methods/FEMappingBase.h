@@ -49,31 +49,34 @@ protected:
   }
 
 public: //Virtual functions - needing definitions
-  /**Returns the locations of the nodes associated with a given cell.*/
-  virtual
-  std::vector<chi_mesh::Vector3>
-  CellNodeLocations(const chi_mesh::Cell& cell) const = 0;
+  virtual QuadratureOrder GetMinimumQuadratureOrder() const
+  {
+    return QuadratureOrder::CONSTANT;
+  }
 
-  typedef std::pair<chi_mesh::CellType, unsigned int/*order*/> QuadratureKey;
+  typedef std::pair<chi_mesh::CellType,QuadratureOrder> QuadratureKey;
+  typedef std::unique_ptr<Quadrature> QuadraturePtr;
   /**Adds the appropriate quadratures for volumetric and surface integrations,
    * for the referenced cell, to the quadrature map. The required quadrature
    * is only added to the map if not already there.*/
   virtual void AddRequiredQuadratures(
-    std::map<QuadratureKey, Quadrature>& quadrature_stack) const
+    chi_math::QuadratureOrder order,
+    std::map<QuadratureKey, QuadraturePtr>& quadrature_stack) const
   {/*Does nothing by default*/};
 
   /**Returns the number of nodes associated with a given cell-face pair.*/
   virtual
-  size_t FaceNumNodes(const chi_mesh::Cell& cell, size_t f) const = 0;
+  size_t FaceNumNodes(size_t face_index) const = 0;
 
   /**Maps a face node to a cell node.*/
   virtual
-  size_t MapFaceNodeToCellNode(const chi_mesh::Cell& cell, size_t face_index,
+  size_t MapFaceNodeToCellNode(size_t face_index,
                                size_t face_node_index) const = 0;
 
   virtual
-  VolumeQPData BuildVolumetricQPData(const chi_mesh::Cell& cell,
-                                     chi_math::QuadratureOrder order) const = 0;
+  VolumeQPData BuildVolumetricQPData(
+    chi_math::QuadratureOrder order,
+    std::map<QuadratureKey, QuadraturePtr>& quadrature_stack) const = 0;
 
 public: //Virtual functions - not needing definitions
 

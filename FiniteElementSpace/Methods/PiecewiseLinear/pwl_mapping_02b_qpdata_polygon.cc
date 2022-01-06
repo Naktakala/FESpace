@@ -7,8 +7,7 @@
 using namespace chi_math::finite_element;
 
 VolumeQPData PiecewiseLinear::
-  BuildVolumetricQPDataPolygon(const chi_mesh::Cell &cell,
-                            chi_math::QuadratureOrder order) const
+  BuildVolumetricQPDataPolygon(chi_math::QuadratureOrder order) const
 {
   std::vector<unsigned int>     quadrature_point_indices; ///< qp index only
   VecVec3                       qpoints_xyz             ; ///< qp index only
@@ -19,10 +18,10 @@ VolumeQPData PiecewiseLinear::
   chi_math::QuadratureTriangle qdata(order);
 
   //=================================== Determine number of internal qpoints
-  size_t num_tris = cell.vertex_ids.size();
+  size_t num_tris = m_cell.vertex_ids.size();
   size_t num_vol_qpoints = qdata.qpoints.size();
   size_t ttl_num_vol_qpoints = num_tris * num_vol_qpoints;
-  size_t num_nodes = cell.vertex_ids.size();
+  size_t num_nodes = m_cell.vertex_ids.size();
 
   //=================================== Determine triangle data
   struct TriangleData
@@ -39,9 +38,9 @@ VolumeQPData PiecewiseLinear::
   for (size_t s=0; s<num_tris; ++s)
   {
     size_t sp1 = (s < (num_tris-1))? s+1 : 0;
-    const auto& v0 = m_grid.vertices[cell.vertex_ids[  s]];
-    const auto& v1 = m_grid.vertices[cell.vertex_ids[sp1]];
-    const auto& v2 = cell.centroid;
+    const auto& v0 = m_grid.vertices[m_cell.vertex_ids[  s]];
+    const auto& v1 = m_grid.vertices[m_cell.vertex_ids[sp1]];
+    const auto& v2 = m_cell.centroid;
 
     const auto v01 = v1-v0;
     const auto v02 = v2-v0;

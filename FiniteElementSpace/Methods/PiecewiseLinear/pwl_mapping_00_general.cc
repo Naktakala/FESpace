@@ -3,6 +3,10 @@
 #include "ChiMesh/MeshContinuum/chi_meshcontinuum.h"
 #include "ChiMesh/chi_mesh_utils.h"
 
+#include "ChiMath/Quadratures/quadrature_gausslegendre.h"
+#include "ChiMath/Quadratures/quadrature_triangle.h"
+#include "ChiMath/Quadratures/quadrature_tetrahedron.h"
+
 using namespace chi_math::finite_element;
 
 //###################################################################
@@ -54,42 +58,65 @@ PiecewiseLinear::
 }
 
 
-size_t PiecewiseLinear::
-  FaceNumNodes(const chi_mesh::Cell& cell, const size_t f) const
+void PiecewiseLinear::
+  AddRequiredQuadratures(
+    const QuadratureOrder q_order,
+    std::map<QuadratureKey, QuadraturePtr> &quadrature_stack) const
 {
-  return cell.faces.at(f).vertex_ids.size();
-}
+  const std::string fname = __FUNCTION__;
 
-std::vector<chi_mesh::Vector3> PiecewiseLinear::
-  CellNodeLocations(const chi_mesh::Cell& cell) const
-{
-  std::vector<chi_mesh::Vector3> node_locations;
-  node_locations.reserve(NumNodes());
+  const auto cell_type = m_cell.Type();
 
-  for (uint64_t vid : cell.vertex_ids)
-    node_locations.push_back(m_grid.vertices[vid]);
+  const QuadratureKey volm_quad_key = {cell_type, q_order};
 
-  return node_locations;
-}
+  //=================================== Check if stack already has required
+  //                                    quadrature
+  if (quadrature_stack.count(volm_quad_key) > 0)
+    return;
 
-size_t PiecewiseLinear::MapFaceNodeToCellNode(const chi_mesh::Cell& cell,
-                                              size_t face_index,
-                                              size_t face_node_index) const
-{
-  return m_face_2_cell_map.at(face_index).at(face_node_index);
-}
+  //=================================== Load volumetric quadrature
+  QuadraturePtr volm_quad;
+  QuadraturePtr surf_quad;
+  QuadratureKey surf_quad_key;
 
-VolumeQPData PiecewiseLinear::
-  BuildVolumetricQPData(const chi_mesh::Cell &cell,
-                        chi_math::QuadratureOrder order) const
-{
-  if (cell.Type() == chi_mesh::CellType::SLAB)
-    return BuildVolumetricQPDataSlab(cell, order);
-  else if (cell.Type() == chi_mesh::CellType::POLYGON)
-    return BuildVolumetricQPDataPolygon(cell, order);
-  else if (cell.Type() == chi_mesh::CellType::POLYHEDRON)
-    return BuildVolumetricQPDataPolyhedron(cell,order);
+  using namespace chi_mesh; using namespace chi_math; using namespace std;
+
+  if      (cell_type == CellType::SLAB)
+  {
+    volm_quad = make_unique<QuadratureGaussLegendre>(q_order);
+    surf_quad = make_unique<QuadratureGaussLegendre>(QuadratureOrder::CONSTANT);
+    surf_quad_key = {CellType::SLAB, QuadratureOrder::CONSTANT};
+  }
+  else if (cell_type == CellType::POLYGON)
+  {
+    volm_quad = make_unique<QuadratureTriangle     >(q_order);
+    surf_quad = make_unique<QuadratureGaussLegendre>(q_order);
+    surf_quad_key = {CellType::SLAB, q_order};
+  }
+  else if (cell_type == CellType::POLYHEDRON)
+  {
+    volm_quad = make_unique<QuadratureTetrahedron  >(q_order);
+    surf_quad = make_unique<QuadratureTriangle     >(q_order);
+    surf_quad_key = {CellType::TRIANGLE, q_order};
+  }
   else
-    throw std::logic_error(std::string(__FUNCTION__) + "Unsupported cell-type"
-                           " encountered.");
+    throw std::logic_error(fname + "Unsupported cell-type encountered.");
+
+  quadrature_stack.insert( make_pair(volm_quad_key, move(volm_quad)) );
+  quadrature_stack.insert( make_pair(surf_quad_key, move(surf_quad)) );
+
+}//AddRequiredQuadratures
+
+
+size_t PiecewiseLinear::
+  FaceNumNodes(const size_t face_index) const
+{
+  return m_cell.faces.at(face_index).vertex_ids.size();
 }
+
+size_t PiecewiseLinear::MapFaceNodeToCellNode(const size_t face_index,
+                                              const size_t face_node_index) const
+{
+  return m_face_2_cell_map.at(face_index).size();
+}
+

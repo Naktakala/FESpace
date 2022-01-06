@@ -43,7 +43,6 @@ include_directories(${PROJECT_SOURCE_DIR})
 # the variable ${SOURCES}
 add_subdirectory(${PROJECT_SOURCE_DIR}/${CHI_MODULE_DIR})
 add_subdirectory(${PROJECT_SOURCE_DIR}/ChiMesh)
-add_subdirectory(${PROJECT_SOURCE_DIR}/ChiMPI)
 add_subdirectory(${PROJECT_SOURCE_DIR}/DiffusionTest)
 
 #================================================ Set Misc flags

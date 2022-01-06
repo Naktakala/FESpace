@@ -7,8 +7,7 @@
 using namespace chi_math::finite_element;
 
 VolumeQPData PiecewiseLinear::
-  BuildVolumetricQPDataSlab(const chi_mesh::Cell &cell,
-                            chi_math::QuadratureOrder order) const
+  BuildVolumetricQPDataSlab(chi_math::QuadratureOrder order) const
 {
   std::vector<unsigned int>     quadrature_point_indices; ///< qp index only
   VecVec3                       qpoints_xyz             ; ///< qp index only
@@ -16,12 +15,12 @@ VolumeQPData PiecewiseLinear::
   std::vector<VecVec3>          shape_grad              ; ///< Node i, then qp
   VecDbl                        JxW                     ; ///< qp index only
 
-  chi_mesh::Vector3 v0 = m_grid.vertices[cell.vertex_ids[0]];
+  chi_mesh::Vector3 v0 = m_grid.vertices[m_cell.vertex_ids[0]];
   chi_math::QuadratureLine qdata(order);
 
   //=================================== Determine number of internal qpoints
   size_t ttl_num_vol_qpoints = qdata.qpoints.size();
-  size_t num_nodes = cell.vertex_ids.size();
+  size_t num_nodes = m_cell.vertex_ids.size();
 
   //=================================== Init volumetric quadrature
   quadrature_point_indices.reserve(ttl_num_vol_qpoints);
